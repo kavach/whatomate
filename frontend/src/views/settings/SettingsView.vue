@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, onMounted, computed } from 'vue'
+import { ref, onMounted, computed, watch } from 'vue'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
@@ -45,6 +45,9 @@ const aiSettings = ref({
   ai_system_prompt: ''
 })
 
+// Separate ref for Switch to ensure reactivity
+const isAIEnabled = ref(false)
+
 const aiProviders = [
   { value: 'openai', label: 'OpenAI', models: ['gpt-4o', 'gpt-4o-mini', 'gpt-4-turbo', 'gpt-3.5-turbo'] },
   { value: 'anthropic', label: 'Anthropic', models: ['claude-3-5-sonnet-latest', 'claude-3-5-haiku-latest', 'claude-3-opus-latest'] },
@@ -54,6 +57,11 @@ const aiProviders = [
 const availableModels = computed(() => {
   const provider = aiProviders.find(p => p.value === aiSettings.value.ai_provider)
   return provider?.models || []
+})
+
+// Keep aiSettings in sync with isAIEnabled
+watch(isAIEnabled, (newValue) => {
+  aiSettings.value.ai_enabled = newValue
 })
 
 onMounted(async () => {
@@ -67,8 +75,10 @@ onMounted(async () => {
         session_timeout_minutes: data.settings.session_timeout_minutes || 30,
         transfer_message: ''
       }
+      const aiEnabledValue = data.settings.ai_enabled === true
+      isAIEnabled.value = aiEnabledValue
       aiSettings.value = {
-        ai_enabled: data.settings.ai_enabled || false,
+        ai_enabled: aiEnabledValue,
         ai_provider: data.settings.ai_provider || '',
         ai_api_key: '', // Don't load API key for security
         ai_model: data.settings.ai_model || '',
@@ -306,12 +316,12 @@ async function saveAISettings() {
                     <p class="text-sm text-muted-foreground">Use AI to generate responses when no flow matches</p>
                   </div>
                   <Switch
-                    :checked="aiSettings.ai_enabled"
-                    @update:checked="aiSettings.ai_enabled = $event"
+                    :checked="isAIEnabled"
+                    @update:checked="(val: boolean) => isAIEnabled = val"
                   />
                 </div>
 
-                <div v-if="aiSettings.ai_enabled" class="space-y-4 pt-2">
+                <div v-if="isAIEnabled" class="space-y-4 pt-2">
                   <Separator />
 
                   <div class="grid grid-cols-2 gap-4">
