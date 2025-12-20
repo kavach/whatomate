@@ -37,35 +37,6 @@ func (a *App) MarkMessageRead(r *fastglue.Request) error {
 	return r.SendErrorEnvelope(fasthttp.StatusNotImplemented, "Not implemented yet", nil, "")
 }
 
-// WhatsApp Flow handlers (Meta Flows, not chatbot flows)
-func (a *App) ListFlows(r *fastglue.Request) error {
-	return r.SendErrorEnvelope(fasthttp.StatusNotImplemented, "Not implemented yet", nil, "")
-}
-
-func (a *App) CreateFlow(r *fastglue.Request) error {
-	return r.SendErrorEnvelope(fasthttp.StatusNotImplemented, "Not implemented yet", nil, "")
-}
-
-func (a *App) GetFlow(r *fastglue.Request) error {
-	return r.SendErrorEnvelope(fasthttp.StatusNotImplemented, "Not implemented yet", nil, "")
-}
-
-func (a *App) UpdateFlow(r *fastglue.Request) error {
-	return r.SendErrorEnvelope(fasthttp.StatusNotImplemented, "Not implemented yet", nil, "")
-}
-
-func (a *App) DeleteFlow(r *fastglue.Request) error {
-	return r.SendErrorEnvelope(fasthttp.StatusNotImplemented, "Not implemented yet", nil, "")
-}
-
-func (a *App) PublishFlow(r *fastglue.Request) error {
-	return r.SendErrorEnvelope(fasthttp.StatusNotImplemented, "Not implemented yet", nil, "")
-}
-
-func (a *App) DeprecateFlow(r *fastglue.Request) error {
-	return r.SendErrorEnvelope(fasthttp.StatusNotImplemented, "Not implemented yet", nil, "")
-}
-
 // Agent transfer handlers
 func (a *App) ListAgentTransfers(r *fastglue.Request) error {
 	return r.SendErrorEnvelope(fasthttp.StatusNotImplemented, "Not implemented yet", nil, "")

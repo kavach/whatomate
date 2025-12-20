@@ -211,8 +211,10 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger) {
 	g.GET("/api/flows/{id}", app.GetFlow)
 	g.PUT("/api/flows/{id}", app.UpdateFlow)
 	g.DELETE("/api/flows/{id}", app.DeleteFlow)
+	g.POST("/api/flows/{id}/save-to-meta", app.SaveFlowToMeta)
 	g.POST("/api/flows/{id}/publish", app.PublishFlow)
 	g.POST("/api/flows/{id}/deprecate", app.DeprecateFlow)
+	g.POST("/api/flows/sync", app.SyncFlows)
 
 	// Bulk Campaigns
 	g.GET("/api/campaigns", app.ListCampaigns)

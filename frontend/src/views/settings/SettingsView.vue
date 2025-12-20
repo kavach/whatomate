@@ -156,7 +156,7 @@ async function saveAISettings() {
 
     <!-- Content -->
     <ScrollArea class="flex-1">
-      <div class="p-6 max-w-3xl">
+      <div class="p-6 space-y-4 max-w-4xl mx-auto">
         <Tabs default-value="general" class="w-full">
           <TabsList class="grid w-full grid-cols-5 mb-6">
             <TabsTrigger value="general">

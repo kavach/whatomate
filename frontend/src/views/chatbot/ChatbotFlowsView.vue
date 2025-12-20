@@ -40,7 +40,7 @@ import {
   TooltipContent,
   TooltipTrigger,
 } from '@/components/ui/tooltip'
-import { chatbotService } from '@/services/api'
+import { chatbotService, flowsService } from '@/services/api'
 import { toast } from 'vue-sonner'
 import { Plus, Pencil, Trash2, Workflow, ArrowLeft, Play, Pause, GripVertical, ChevronDown, ChevronUp } from 'lucide-vue-next'
 
@@ -98,7 +98,15 @@ interface ChatbotFlow {
   steps?: FlowStep[]
 }
 
+interface WhatsAppFlow {
+  id: string
+  name: string
+  status: string
+  meta_flow_id: string
+}
+
 const flows = ref<ChatbotFlow[]>([])
+const whatsappFlows = ref<WhatsAppFlow[]>([])
 const isLoading = ref(true)
 const isDialogOpen = ref(false)
 const isSubmitting = ref(false)
@@ -153,7 +161,7 @@ const defaultStep: FlowStep = {
 }
 
 onMounted(async () => {
-  await fetchFlows()
+  await Promise.all([fetchFlows(), fetchWhatsAppFlows()])
 })
 
 async function fetchFlows() {
@@ -167,6 +175,21 @@ async function fetchFlows() {
     flows.value = []
   } finally {
     isLoading.value = false
+  }
+}
+
+async function fetchWhatsAppFlows() {
+  try {
+    const response = await flowsService.list()
+    const data = response.data.data || response.data
+    const allFlows = data.flows || []
+    // Only show published flows that have a meta_flow_id
+    whatsappFlows.value = allFlows.filter(
+      (f: WhatsAppFlow) => f.meta_flow_id && f.status?.toUpperCase() === 'PUBLISHED'
+    )
+  } catch (error) {
+    console.error('Failed to load WhatsApp flows:', error)
+    whatsappFlows.value = []
   }
 }
 
@@ -362,7 +385,8 @@ const inputTypes = [
 const messageTypes = [
   { value: 'text', label: 'Static Text' },
   { value: 'buttons', label: 'Text with Buttons' },
-  { value: 'api_fetch', label: 'Fetch from API' }
+  { value: 'api_fetch', label: 'Fetch from API' },
+  { value: 'whatsapp_flow', label: 'WhatsApp Flow' }
 ]
 
 const httpMethods = ['GET', 'POST', 'PUT', 'PATCH']
@@ -722,6 +746,57 @@ function removeButton(step: FlowStep, index: number) {
                               />
                               <p class="text-xs text-muted-foreground">Sent if API call fails</p>
                             </div>
+                          </div>
+                        </div>
+
+                        <!-- WhatsApp Flow Configuration -->
+                        <div v-if="step.message_type === 'whatsapp_flow'" class="space-y-4 p-4 border rounded-lg bg-muted/10">
+                          <div class="flex items-center gap-2 mb-2">
+                            <Badge variant="outline">WhatsApp Flow</Badge>
+                          </div>
+
+                          <div class="space-y-2">
+                            <Label>Select WhatsApp Flow *</Label>
+                            <Select v-model="step.input_config.whatsapp_flow_id">
+                              <SelectTrigger>
+                                <SelectValue :placeholder="whatsappFlows.length === 0 ? 'No published flows available' : 'Select a published flow'" />
+                              </SelectTrigger>
+                              <SelectContent>
+                                <SelectItem v-for="wf in whatsappFlows" :key="wf.id" :value="wf.meta_flow_id">
+                                  {{ wf.name }}
+                                </SelectItem>
+                              </SelectContent>
+                            </Select>
+                            <p class="text-xs text-muted-foreground">
+                              Only published WhatsApp Flows are available. The flow will be sent as an interactive message.
+                            </p>
+                          </div>
+
+                          <div class="space-y-2">
+                            <Label>Flow Header Text (optional)</Label>
+                            <Input
+                              v-model="step.input_config.flow_header"
+                              placeholder="Complete the form below"
+                            />
+                          </div>
+
+                          <div class="space-y-2">
+                            <Label>Flow Body Text</Label>
+                            <Textarea
+                              v-model="step.message"
+                              placeholder="Please fill out this form to continue."
+                              :rows="2"
+                            />
+                          </div>
+
+                          <div class="space-y-2">
+                            <Label>Flow Button Text</Label>
+                            <Input
+                              v-model="step.input_config.flow_cta"
+                              placeholder="Open Form"
+                              maxlength="20"
+                            />
+                            <p class="text-xs text-muted-foreground">Max 20 characters</p>
                           </div>
                         </div>
 

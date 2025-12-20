@@ -128,7 +128,10 @@ export const flowsService = {
   create: (data: any) => api.post('/flows', data),
   update: (id: string, data: any) => api.put(`/flows/${id}`, data),
   delete: (id: string) => api.delete(`/flows/${id}`),
-  publish: (id: string) => api.post(`/flows/${id}/publish`)
+  saveToMeta: (id: string) => api.post(`/flows/${id}/save-to-meta`),
+  publish: (id: string) => api.post(`/flows/${id}/publish`),
+  deprecate: (id: string) => api.post(`/flows/${id}/deprecate`),
+  sync: (whatsappAccount: string) => api.post('/flows/sync', { whatsapp_account: whatsappAccount })
 }
 
 export const campaignsService = {

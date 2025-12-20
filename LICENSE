@@ -1,0 +1,46 @@
+Whatomate License
+
+Copyright (c) 2024 Shridar Patil
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to use,
+copy, modify, merge, and distribute copies of the Software, subject to the
+following conditions:
+
+1. FREE USE: The Software may be used freely for personal, educational,
+   internal business, or non-commercial purposes.
+
+2. FREE DISTRIBUTION: The Software may be freely distributed, provided that
+   this license notice is included with all copies or substantial portions
+   of the Software.
+
+3. NO SALE: The Software, or any derivative works based on the Software,
+   may NOT be sold, licensed for a fee, or otherwise commercialized as a
+   standalone product.
+
+4. NO SAAS: The Software may NOT be offered to third parties as a hosted
+   or managed service (Software-as-a-Service, SaaS, PaaS, or similar) where
+   the service provides users with access to any substantial functionality
+   of the Software. This restriction applies to offering the Software as a
+   commercial service to others, not to using it internally within your own
+   organization.
+
+5. ATTRIBUTION: Any distribution of the Software must retain this copyright
+   notice, this list of conditions, and the following disclaimer.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+SOFTWARE.
+
+---
+
+In summary:
+- You CAN use this software freely
+- You CAN modify and distribute it freely
+- You CAN use it for your own business internally
+- You CANNOT sell it
+- You CANNOT offer it as a SaaS/hosted service to others
