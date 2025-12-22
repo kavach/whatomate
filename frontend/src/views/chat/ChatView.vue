@@ -324,6 +324,13 @@ function getMessageContent(message: Message): string {
   if (message.message_type === 'text') {
     return message.content?.body || ''
   }
+  if (message.message_type === 'interactive') {
+    // Interactive messages store body text in content (string) or content.body
+    if (typeof message.content === 'string') {
+      return message.content
+    }
+    return message.content?.body || '[Interactive Message]'
+  }
   if (message.message_type === 'image') {
     return '[Image]'
   }
