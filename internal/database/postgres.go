@@ -72,6 +72,9 @@ func AutoMigrate(db *gorm.DB) error {
 		&models.ChatbotSessionMessage{},
 		&models.AIContext{},
 		&models.AgentTransfer{},
+
+		// Canned responses
+		&models.CannedResponse{},
 	)
 }
 
@@ -113,6 +116,10 @@ func CreateIndexes(db *gorm.DB) error {
 		// Messages and contacts by account
 		`CREATE INDEX IF NOT EXISTS idx_messages_account ON messages(whats_app_account, created_at DESC)`,
 		`CREATE INDEX IF NOT EXISTS idx_contacts_account ON contacts(whats_app_account)`,
+
+		// Canned responses indexes
+		`CREATE UNIQUE INDEX IF NOT EXISTS idx_canned_responses_org_name ON canned_responses(organization_id, name)`,
+		`CREATE INDEX IF NOT EXISTS idx_canned_responses_active ON canned_responses(organization_id, is_active, usage_count DESC)`,
 	}
 
 	for _, idx := range indexes {

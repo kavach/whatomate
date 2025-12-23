@@ -57,6 +57,7 @@ import {
   Play
 } from 'lucide-vue-next'
 import { formatTime, getInitials, truncate } from '@/lib/utils'
+import CannedResponsePicker from '@/components/chat/CannedResponsePicker.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -83,6 +84,10 @@ const isUploadingMedia = ref(false)
 // Cache for media blob URLs (message_id -> blob URL)
 const mediaBlobUrls = ref<Record<string, string>>({})
 const mediaLoadingStates = ref<Record<string, boolean>>({})
+
+// Canned responses slash command state
+const cannedPickerOpen = ref(false)
+const cannedSearchQuery = ref('')
 
 const contactId = computed(() => route.params.contactId as string | undefined)
 
@@ -220,6 +225,30 @@ async function sendMessage() {
     isSending.value = false
   }
 }
+
+function insertCannedResponse(content: string) {
+  messageInput.value = content
+  cannedPickerOpen.value = false
+  cannedSearchQuery.value = ''
+}
+
+function closeCannedPicker() {
+  cannedPickerOpen.value = false
+  cannedSearchQuery.value = ''
+}
+
+// Watch for slash commands in message input
+watch(messageInput, (val) => {
+  if (val.startsWith('/')) {
+    const query = val.slice(1) // Remove the leading /
+    cannedSearchQuery.value = query
+    cannedPickerOpen.value = true
+  } else if (cannedPickerOpen.value) {
+    // Close picker if user removes the /
+    cannedPickerOpen.value = false
+    cannedSearchQuery.value = ''
+  }
+})
 
 async function assignContactToUser(userId: string | null) {
   if (!contactsStore.currentContact) return
@@ -882,6 +911,18 @@ async function sendMediaMessage() {
                   </Button>
                 </TooltipTrigger>
                 <TooltipContent>Emoji</TooltipContent>
+              </Tooltip>
+              <Tooltip>
+                <TooltipTrigger as-child>
+                  <CannedResponsePicker
+                    :contact="contactsStore.currentContact"
+                    :external-open="cannedPickerOpen"
+                    :external-search="cannedSearchQuery"
+                    @select="insertCannedResponse"
+                    @close="closeCannedPicker"
+                  />
+                </TooltipTrigger>
+                <TooltipContent>Canned Responses</TooltipContent>
               </Tooltip>
               <Tooltip>
                 <TooltipTrigger as-child>

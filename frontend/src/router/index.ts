@@ -125,6 +125,12 @@ const router = createRouter({
           meta: { roles: ['admin', 'manager'] }
         },
         {
+          path: 'settings/canned-responses',
+          name: 'canned-responses',
+          component: () => import('@/views/settings/CannedResponsesView.vue'),
+          meta: { roles: ['admin', 'manager'] }
+        },
+        {
           path: 'settings/users',
           name: 'users',
           component: () => import('@/views/settings/UsersView.vue'),

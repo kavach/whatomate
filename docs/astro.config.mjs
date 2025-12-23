@@ -25,6 +25,7 @@ export default defineConfig({
           items: [
             { label: 'Dashboard', slug: 'features/dashboard' },
             { label: 'Chatbot Automation', slug: 'features/chatbot' },
+            { label: 'Canned Responses', slug: 'features/canned-responses' },
             { label: 'Templates', slug: 'features/templates' },
             { label: 'Campaigns', slug: 'features/campaigns' },
             { label: 'WhatsApp Flows', slug: 'features/whatsapp-flows' },
@@ -44,6 +45,7 @@ export default defineConfig({
             { label: 'Flows', slug: 'api-reference/flows' },
             { label: 'Campaigns', slug: 'api-reference/campaigns' },
             { label: 'Chatbot', slug: 'api-reference/chatbot' },
+            { label: 'Canned Responses', slug: 'api-reference/canned-responses' },
             { label: 'Webhooks', slug: 'api-reference/webhooks' },
             { label: 'Analytics', slug: 'api-reference/analytics' },
           ],

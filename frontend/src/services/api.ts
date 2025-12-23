@@ -226,6 +226,30 @@ export const chatbotService = {
     api.put(`/chatbot/transfers/${id}/assign`, { agent_id: agentId })
 }
 
+export interface CannedResponse {
+  id: string
+  name: string
+  shortcut: string
+  content: string
+  category: string
+  is_active: boolean
+  usage_count: number
+  created_at: string
+  updated_at: string
+}
+
+export const cannedResponsesService = {
+  list: (params?: { category?: string; search?: string; active_only?: string }) =>
+    api.get('/canned-responses', { params }),
+  get: (id: string) => api.get(`/canned-responses/${id}`),
+  create: (data: { name: string; shortcut?: string; content: string; category?: string }) =>
+    api.post('/canned-responses', data),
+  update: (id: string, data: { name?: string; shortcut?: string; content?: string; category?: string; is_active?: boolean }) =>
+    api.put(`/canned-responses/${id}`, data),
+  delete: (id: string) => api.delete(`/canned-responses/${id}`),
+  use: (id: string) => api.post(`/canned-responses/${id}/use`)
+}
+
 export const analyticsService = {
   dashboard: (params?: { from?: string; to?: string }) =>
     api.get('/analytics/dashboard', { params }),

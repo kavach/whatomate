@@ -26,7 +26,8 @@ import {
   Sparkles,
   Key,
   User,
-  UserX
+  UserX,
+  MessageSquareText
 } from 'lucide-vue-next'
 import { getInitials } from '@/lib/utils'
 
@@ -95,6 +96,7 @@ const allNavItems = [
     children: [
       { name: 'General', path: '/settings', icon: Settings },
       { name: 'Accounts', path: '/settings/accounts', icon: Users },
+      { name: 'Canned Responses', path: '/settings/canned-responses', icon: MessageSquareText },
       { name: 'Users', path: '/settings/users', icon: Users, roles: ['admin'] },
       { name: 'API Keys', path: '/settings/api-keys', icon: Key, roles: ['admin'] }
     ]

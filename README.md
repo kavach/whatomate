@@ -15,6 +15,11 @@ A modern WhatsApp Business Platform built with Go (Fastglue) and Vue.js (shadcn-
   - Conversation flows with branching logic
   - AI-powered responses (OpenAI, Anthropic, Google)
   - Agent transfer support
+- **Canned Responses**: Pre-defined quick replies for agents
+  - Organization-wide shared responses
+  - Category-based organization (Greetings, Support, Sales, etc.)
+  - Slash command support (type `/shortcut` in chat)
+  - Dynamic placeholders (`{{contact_name}}`, `{{phone_number}}`)
 - **Analytics Dashboard**: Track messages, engagement, and campaign performance
 
 ## Screenshots
@@ -250,6 +255,14 @@ google_api_key = ""
 - `GET /api/chatbot/flows` - List flows
 - `GET /api/chatbot/ai-contexts` - List AI contexts
 
+### Canned Responses
+- `GET /api/canned-responses` - List canned responses
+- `POST /api/canned-responses` - Create canned response
+- `GET /api/canned-responses/:id` - Get canned response
+- `PUT /api/canned-responses/:id` - Update canned response
+- `DELETE /api/canned-responses/:id` - Delete canned response
+- `POST /api/canned-responses/:id/use` - Track usage
+
 ### Webhooks
 - `GET /api/webhook` - Webhook verification
 - `POST /api/webhook` - Receive messages
@@ -268,6 +281,7 @@ The platform supports three user roles with different permission levels:
 | Flows | Full | Full | None |
 | Campaigns | Full | Full | None |
 | Chatbot Settings | Full | Full | None |
+| Canned Responses | Full | Full | Use only |
 | Analytics | Full | Full | None |
 
 - **Admin**: Full access to all features including user management
