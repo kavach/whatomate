@@ -27,20 +27,22 @@ type AssignTransferRequest struct {
 
 // AgentTransferResponse represents an agent transfer in API responses
 type AgentTransferResponse struct {
-	ID              string  `json:"id"`
-	ContactID       string  `json:"contact_id"`
-	ContactName     string  `json:"contact_name"`
-	PhoneNumber     string  `json:"phone_number"`
-	WhatsAppAccount string  `json:"whatsapp_account"`
-	Status          string  `json:"status"`
-	Source          string  `json:"source"`
-	AgentID         *string `json:"agent_id,omitempty"`
-	AgentName       *string `json:"agent_name,omitempty"`
-	Notes           string  `json:"notes"`
-	TransferredAt   string  `json:"transferred_at"`
-	ResumedAt       *string `json:"resumed_at,omitempty"`
-	ResumedBy       *string `json:"resumed_by,omitempty"`
-	ResumedByName   *string `json:"resumed_by_name,omitempty"`
+	ID                string  `json:"id"`
+	ContactID         string  `json:"contact_id"`
+	ContactName       string  `json:"contact_name"`
+	PhoneNumber       string  `json:"phone_number"`
+	WhatsAppAccount   string  `json:"whatsapp_account"`
+	Status            string  `json:"status"`
+	Source            string  `json:"source"`
+	AgentID           *string `json:"agent_id,omitempty"`
+	AgentName         *string `json:"agent_name,omitempty"`
+	TransferredBy     *string `json:"transferred_by,omitempty"`
+	TransferredByName *string `json:"transferred_by_name,omitempty"`
+	Notes             string  `json:"notes"`
+	TransferredAt     string  `json:"transferred_at"`
+	ResumedAt         *string `json:"resumed_at,omitempty"`
+	ResumedBy         *string `json:"resumed_by,omitempty"`
+	ResumedByName     *string `json:"resumed_by_name,omitempty"`
 }
 
 // ListAgentTransfers lists agent transfers for the organization
@@ -60,6 +62,7 @@ func (a *App) ListAgentTransfers(r *fastglue.Request) error {
 	query := a.DB.Where("organization_id = ?", orgID).
 		Preload("Contact").
 		Preload("Agent").
+		Preload("TransferredByUser").
 		Preload("ResumedByUser").
 		Order("transferred_at ASC") // FIFO
 
@@ -112,6 +115,14 @@ func (a *App) ListAgentTransfers(r *fastglue.Request) error {
 			}
 		}
 
+		if t.TransferredByUserID != nil {
+			transferredBy := t.TransferredByUserID.String()
+			resp.TransferredBy = &transferredBy
+			if t.TransferredByUser != nil {
+				resp.TransferredByName = &t.TransferredByUser.FullName
+			}
+		}
+
 		if t.ResumedAt != nil {
 			resumedAt := t.ResumedAt.Format(time.RFC3339)
 			resp.ResumedAt = &resumedAt
@@ -140,6 +151,8 @@ func (a *App) CreateAgentTransfer(r *fastglue.Request) error {
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
+
+	userID, _ := r.RequestCtx.UserValue("user_id").(uuid.UUID)
 
 	var req CreateAgentTransferRequest
 	if err := json.Unmarshal(r.RequestCtx.PostBody(), &req); err != nil {
@@ -207,16 +220,17 @@ func (a *App) CreateAgentTransfer(r *fastglue.Request) error {
 
 	// Create transfer
 	transfer := models.AgentTransfer{
-		BaseModel:       models.BaseModel{ID: uuid.New()},
-		OrganizationID:  orgID,
-		ContactID:       contactID,
-		WhatsAppAccount: req.WhatsAppAccount,
-		PhoneNumber:     contact.PhoneNumber,
-		Status:          "active",
-		Source:          source,
-		AgentID:         agentID,
-		Notes:           req.Notes,
-		TransferredAt:   time.Now(),
+		BaseModel:           models.BaseModel{ID: uuid.New()},
+		OrganizationID:      orgID,
+		ContactID:           contactID,
+		WhatsAppAccount:     req.WhatsAppAccount,
+		PhoneNumber:         contact.PhoneNumber,
+		Status:              "active",
+		Source:              source,
+		AgentID:             agentID,
+		TransferredByUserID: &userID,
+		Notes:               req.Notes,
+		TransferredAt:       time.Now(),
 	}
 
 	if err := a.DB.Create(&transfer).Error; err != nil {
@@ -260,7 +274,7 @@ func (a *App) CreateAgentTransfer(r *fastglue.Request) error {
 	})
 
 	// Load relations for response
-	a.DB.Preload("Agent").First(&transfer, transfer.ID)
+	a.DB.Preload("Agent").Preload("TransferredByUser").First(&transfer, transfer.ID)
 
 	resp := AgentTransferResponse{
 		ID:              transfer.ID.String(),
@@ -279,6 +293,14 @@ func (a *App) CreateAgentTransfer(r *fastglue.Request) error {
 		resp.AgentID = &agentIDStr
 		if transfer.Agent != nil {
 			resp.AgentName = &transfer.Agent.FullName
+		}
+	}
+
+	if transfer.TransferredByUserID != nil {
+		transferredBy := transfer.TransferredByUserID.String()
+		resp.TransferredBy = &transferredBy
+		if transfer.TransferredByUser != nil {
+			resp.TransferredByName = &transfer.TransferredByUser.FullName
 		}
 	}
 
@@ -495,8 +517,12 @@ func (a *App) PickNextTransfer(r *fastglue.Request) error {
 		})
 	}
 
-	// Assign to current user
+	// Assign to current user (self-pick)
 	transfer.AgentID = &userID
+	// If no one initiated the transfer, mark the picker as the one who initiated (self-pick)
+	if transfer.TransferredByUserID == nil {
+		transfer.TransferredByUserID = &userID
+	}
 	if err := a.DB.Save(&transfer).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to pick transfer", nil, "")
 	}
@@ -531,6 +557,13 @@ func (a *App) PickNextTransfer(r *fastglue.Request) error {
 	agentIDStr := userID.String()
 	resp.AgentID = &agentIDStr
 	resp.AgentName = &agent.FullName
+
+	// Set TransferredBy (self-pick)
+	if transfer.TransferredByUserID != nil {
+		transferredBy := transfer.TransferredByUserID.String()
+		resp.TransferredBy = &transferredBy
+		resp.TransferredByName = &agent.FullName
+	}
 
 	return r.SendEnvelope(map[string]any{
 		"message":  "Transfer picked successfully",

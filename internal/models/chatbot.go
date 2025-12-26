@@ -195,23 +195,25 @@ func (AIContext) TableName() string {
 // AgentTransfer tracks when conversations are transferred to human agents
 type AgentTransfer struct {
 	BaseModel
-	OrganizationID  uuid.UUID  `gorm:"type:uuid;index;not null" json:"organization_id"`
-	ContactID       uuid.UUID  `gorm:"type:uuid;index;not null" json:"contact_id"`
-	WhatsAppAccount string     `gorm:"size:100;index;not null" json:"whatsapp_account"` // References WhatsAppAccount.Name
-	PhoneNumber     string     `gorm:"size:20;not null" json:"phone_number"`
-	Status          string     `gorm:"size:20;default:'active'" json:"status"` // active, resumed
-	Source          string     `gorm:"size:20;default:'manual'" json:"source"` // manual, flow, keyword
-	AgentID         *uuid.UUID `gorm:"type:uuid" json:"agent_id,omitempty"`
-	Notes           string     `gorm:"type:text" json:"notes"`
-	TransferredAt   time.Time  `gorm:"autoCreateTime" json:"transferred_at"`
-	ResumedAt       *time.Time `json:"resumed_at,omitempty"`
-	ResumedBy       *uuid.UUID `gorm:"type:uuid" json:"resumed_by,omitempty"`
+	OrganizationID      uuid.UUID  `gorm:"type:uuid;index;not null" json:"organization_id"`
+	ContactID           uuid.UUID  `gorm:"type:uuid;index;not null" json:"contact_id"`
+	WhatsAppAccount     string     `gorm:"size:100;index;not null" json:"whatsapp_account"` // References WhatsAppAccount.Name
+	PhoneNumber         string     `gorm:"size:20;not null" json:"phone_number"`
+	Status              string     `gorm:"size:20;default:'active'" json:"status"` // active, resumed
+	Source              string     `gorm:"size:20;default:'manual'" json:"source"` // manual, flow, keyword, chatbot_disabled
+	AgentID             *uuid.UUID `gorm:"type:uuid" json:"agent_id,omitempty"`
+	TransferredByUserID *uuid.UUID `gorm:"type:uuid" json:"transferred_by_user_id,omitempty"` // User who initiated the transfer (null for system)
+	Notes               string     `gorm:"type:text" json:"notes"`
+	TransferredAt       time.Time  `gorm:"autoCreateTime" json:"transferred_at"`
+	ResumedAt           *time.Time `json:"resumed_at,omitempty"`
+	ResumedBy           *uuid.UUID `gorm:"type:uuid" json:"resumed_by,omitempty"`
 
 	// Relations
-	Organization  *Organization `gorm:"foreignKey:OrganizationID" json:"organization,omitempty"`
-	Contact       *Contact      `gorm:"foreignKey:ContactID" json:"contact,omitempty"`
-	Agent         *User         `gorm:"foreignKey:AgentID" json:"agent,omitempty"`
-	ResumedByUser *User         `gorm:"foreignKey:ResumedBy" json:"resumed_by_user,omitempty"`
+	Organization      *Organization `gorm:"foreignKey:OrganizationID" json:"organization,omitempty"`
+	Contact           *Contact      `gorm:"foreignKey:ContactID" json:"contact,omitempty"`
+	Agent             *User         `gorm:"foreignKey:AgentID" json:"agent,omitempty"`
+	TransferredByUser *User         `gorm:"foreignKey:TransferredByUserID" json:"transferred_by_user,omitempty"`
+	ResumedByUser     *User         `gorm:"foreignKey:ResumedBy" json:"resumed_by_user,omitempty"`
 }
 
 func (AgentTransfer) TableName() string {
