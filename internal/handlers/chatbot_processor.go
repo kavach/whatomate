@@ -1876,10 +1876,22 @@ func (a *App) handleIncomingReaction(account *models.WhatsAppAccount, fromPhone,
 	)
 
 	// Find the message being reacted to
+	// WhatsApp encodes phone numbers in the WAMID prefix, so the same message
+	// has different WAMIDs from sender vs recipient perspective.
+	// We match on the suffix (after "FQIAEhgU") which is the unique message ID.
 	var message models.Message
 	if err := a.DB.Where("whats_app_message_id = ?", messageWAMID).First(&message).Error; err != nil {
-		a.Log.Warn("Message not found for reaction", "wamid", messageWAMID)
-		return
+		// Try matching on WAMID suffix (the unique message ID part)
+		if idx := strings.Index(messageWAMID, "FQIAEhgU"); idx != -1 {
+			suffix := messageWAMID[idx:]
+			if err := a.DB.Where("whats_app_message_id LIKE ?", "%"+suffix).First(&message).Error; err != nil {
+				a.Log.Warn("Message not found for reaction", "wamid", messageWAMID, "suffix", suffix)
+				return
+			}
+		} else {
+			a.Log.Warn("Message not found for reaction", "wamid", messageWAMID)
+			return
+		}
 	}
 
 	// Get or create contact
