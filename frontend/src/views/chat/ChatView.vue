@@ -1214,15 +1214,18 @@ async function sendMediaMessage() {
                 <span v-if="getMessageContent(message)" class="whitespace-pre-wrap break-words">{{ getMessageContent(message) }}<span class="chat-bubble-time"><span>{{ formatMessageTime(message.created_at) }}</span><component v-if="message.direction === 'outgoing'" :is="getMessageStatusIcon(message.status)" :class="['h-5 w-5 status-icon', getMessageStatusClass(message.status)]" /></span></span>
                 <!-- Fallback for media without URL -->
                 <span v-else-if="isMediaMessage(message) && !message.media_url" class="text-muted-foreground italic">[{{ message.message_type.charAt(0).toUpperCase() + message.message_type.slice(1) }}]<span class="chat-bubble-time"><span>{{ formatMessageTime(message.created_at) }}</span><component v-if="message.direction === 'outgoing'" :is="getMessageStatusIcon(message.status)" :class="['h-5 w-5 status-icon', getMessageStatusClass(message.status)]" /></span></span>
-                <!-- Interactive buttons -->
+                <!-- Interactive buttons - WhatsApp style -->
                 <div
                   v-if="getInteractiveButtons(message).length > 0"
-                  class="mt-2 space-y-1"
+                  class="interactive-buttons mt-2 -mx-2 -mb-1.5 border-t border-black/10"
                 >
                   <div
-                    v-for="btn in getInteractiveButtons(message)"
+                    v-for="(btn, index) in getInteractiveButtons(message)"
                     :key="btn.id"
-                    class="px-3 py-1.5 text-sm text-center border rounded-lg bg-background/50"
+                    :class="[
+                      'py-2 text-sm text-center text-[#00a5f4] font-medium cursor-pointer hover:bg-black/5',
+                      index > 0 && 'border-t border-black/10'
+                    ]"
                   >
                     {{ btn.title }}
                   </div>

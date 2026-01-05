@@ -235,6 +235,24 @@
   background: rgba(233, 237, 239, 0.12);
 }
 
+/* WhatsApp-style interactive buttons */
+.interactive-buttons {
+  border-radius: 0 0 7.5px 7.5px;
+  overflow: hidden;
+}
+
+.dark .interactive-buttons {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.dark .interactive-buttons > div {
+  border-color: rgba(255, 255, 255, 0.1);
+}
+
+.dark .interactive-buttons > div:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
 /* Message highlight animation for scroll-to */
 @keyframes highlight-pulse {
   0%, 100% { background-color: transparent; }
