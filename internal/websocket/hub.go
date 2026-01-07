@@ -10,8 +10,8 @@ import (
 
 // Hub maintains the set of active clients and broadcasts messages to them
 type Hub struct {
-	// clients maps organization ID -> user ID -> client
-	clients map[uuid.UUID]map[uuid.UUID]*Client
+	// clients maps organization ID -> user ID -> set of clients (supports multiple tabs)
+	clients map[uuid.UUID]map[uuid.UUID]map[*Client]struct{}
 
 	// broadcast channel for messages
 	broadcast chan BroadcastMessage
@@ -32,7 +32,7 @@ type Hub struct {
 // NewHub creates a new Hub instance
 func NewHub(log logf.Logger) *Hub {
 	return &Hub{
-		clients:    make(map[uuid.UUID]map[uuid.UUID]*Client),
+		clients:    make(map[uuid.UUID]map[uuid.UUID]map[*Client]struct{}),
 		broadcast:  make(chan BroadcastMessage, 256),
 		register:   make(chan *Client),
 		unregister: make(chan *Client),
@@ -63,19 +63,23 @@ func (h *Hub) registerClient(client *Client) {
 
 	orgClients, ok := h.clients[client.organizationID]
 	if !ok {
-		orgClients = make(map[uuid.UUID]*Client)
+		orgClients = make(map[uuid.UUID]map[*Client]struct{})
 		h.clients[client.organizationID] = orgClients
 	}
 
-	// Close existing connection for same user if any
-	if existing, ok := orgClients[client.userID]; ok {
-		close(existing.send)
+	userClients, ok := orgClients[client.userID]
+	if !ok {
+		userClients = make(map[*Client]struct{})
+		orgClients[client.userID] = userClients
 	}
 
-	orgClients[client.userID] = client
+	// Add this client to the set (allows multiple tabs)
+	userClients[client] = struct{}{}
+
 	h.log.Info("WebSocket client registered",
 		"user_id", client.userID,
 		"org_id", client.organizationID,
+		"user_connections", len(userClients),
 		"total_clients", h.countClients())
 }
 
@@ -85,13 +89,20 @@ func (h *Hub) unregisterClient(client *Client) {
 	defer h.mu.Unlock()
 
 	if orgClients, ok := h.clients[client.organizationID]; ok {
-		if existing, ok := orgClients[client.userID]; ok && existing == client {
-			delete(orgClients, client.userID)
-			close(client.send)
+		if userClients, ok := orgClients[client.userID]; ok {
+			if _, exists := userClients[client]; exists {
+				delete(userClients, client)
+				close(client.send)
 
-			// Clean up empty org map
-			if len(orgClients) == 0 {
-				delete(h.clients, client.organizationID)
+				// Clean up empty user map
+				if len(userClients) == 0 {
+					delete(orgClients, client.userID)
+				}
+
+				// Clean up empty org map
+				if len(orgClients) == 0 {
+					delete(h.clients, client.organizationID)
+				}
 			}
 		}
 	}
@@ -118,19 +129,23 @@ func (h *Hub) broadcastMessage(msg BroadcastMessage) {
 		return
 	}
 
-	for _, client := range orgClients {
-		// If ContactID is specified, only send to clients viewing that contact
-		if msg.ContactID != uuid.Nil && client.currentContact != nil && *client.currentContact != msg.ContactID {
-			continue
-		}
+	// Iterate through all users in the organization
+	for _, userClients := range orgClients {
+		// Iterate through all clients (tabs) for each user
+		for client := range userClients {
+			// If ContactID is specified, only send to clients viewing that contact
+			if msg.ContactID != uuid.Nil && client.currentContact != nil && *client.currentContact != msg.ContactID {
+				continue
+			}
 
-		select {
-		case client.send <- data:
-		default:
-			// Client buffer full, skip
-			h.log.Warn("Client send buffer full, skipping",
-				"user_id", client.userID,
-				"org_id", client.organizationID)
+			select {
+			case client.send <- data:
+			default:
+				// Client buffer full, skip
+				h.log.Warn("Client send buffer full, skipping",
+					"user_id", client.userID,
+					"org_id", client.organizationID)
+			}
 		}
 	}
 }
@@ -165,7 +180,9 @@ func (h *Hub) BroadcastToContact(orgID, contactID uuid.UUID, msg WSMessage) {
 func (h *Hub) countClients() int {
 	count := 0
 	for _, orgClients := range h.clients {
-		count += len(orgClients)
+		for _, userClients := range orgClients {
+			count += len(userClients)
+		}
 	}
 	return count
 }
