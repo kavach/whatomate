@@ -112,9 +112,32 @@ whatomate/
 
 ## Getting Started
 
-### Quick Start (Docker)
+### Quick Start (Pre-built Image)
 
-The fastest way to get started:
+The fastest way to get started using pre-built Docker images:
+
+```bash
+# Pull and run with Docker Compose
+curl -O https://raw.githubusercontent.com/shridarpatil/whatomate/main/docker/docker-compose.yml
+docker compose up -d
+
+# Access the application
+open http://localhost:8080
+```
+
+Or pull images directly:
+
+```bash
+# From Docker Hub
+docker pull shridh0r/whatomate:latest
+
+# From GitHub Container Registry
+docker pull ghcr.io/shridarpatil/whatomate:latest
+```
+
+**Default login:** `admin@admin.com` / `admin`
+
+### Quick Start (Build from Source)
 
 ```bash
 # Clone the repository
@@ -127,8 +150,6 @@ make docker-up
 # Access the application
 open http://localhost:8080
 ```
-
-**Default login:** `admin@admin.com` / `admin`
 
 ### Manual Installation
 
