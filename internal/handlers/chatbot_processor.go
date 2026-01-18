@@ -770,8 +770,10 @@ func (a *App) startFlow(account *models.WhatsAppAccount, session *models.Chatbot
 	session.CurrentStep = ""
 	session.StepRetries = 0
 	session.SessionData = models.JSONB{
-		"_flow_id":   flow.ID.String(),
-		"_flow_name": flow.Name,
+		"_flow_id":      flow.ID.String(),
+		"_flow_name":    flow.Name,
+		"_phone_number": contact.PhoneNumber,
+		"_profile_name": contact.ProfileName,
 	}
 	a.DB.Save(session)
 
