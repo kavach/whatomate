@@ -351,7 +351,23 @@ function setupScrollListener() {
   // Get the viewport element from ScrollArea
   const scrollArea = messagesScrollAreaRef.value?.$el
   if (scrollArea) {
-    scrollViewport = scrollArea.querySelector('[data-radix-scroll-area-viewport]')
+    // Find the scrollable viewport - it's the element with overflow:scroll/auto
+    // Try data attributes first, then find by computed style
+    scrollViewport = scrollArea.querySelector('[data-reka-scroll-area-viewport]') ||
+                     scrollArea.querySelector('[data-radix-scroll-area-viewport]')
+
+    if (!scrollViewport) {
+      // Fallback: find child element that has overflow scroll/auto
+      const children = scrollArea.querySelectorAll('*')
+      for (const child of children) {
+        const style = window.getComputedStyle(child)
+        if (style.overflowY === 'scroll' || style.overflowY === 'auto') {
+          scrollViewport = child as HTMLElement
+          break
+        }
+      }
+    }
+
     if (scrollViewport) {
       scrollViewport.addEventListener('scroll', handleScroll)
     }
@@ -934,6 +950,28 @@ function getInteractiveButtons(message: Message): Array<{ id: string; title: str
     id: btn.reply?.id || btn.id || '',
     title: btn.reply?.title || btn.title || ''
   }))
+}
+
+interface CTAUrlData {
+  type: 'cta_url'
+  body: string
+  button_text: string
+  url: string
+}
+
+function getCTAUrlData(message: Message): CTAUrlData | null {
+  if (message.message_type !== 'interactive' || !message.interactive_data) {
+    return null
+  }
+  if (message.interactive_data.type !== 'cta_url') {
+    return null
+  }
+  return {
+    type: 'cta_url',
+    body: message.interactive_data.body || '',
+    button_text: message.interactive_data.button_text || 'Open',
+    url: message.interactive_data.url || ''
+  }
 }
 
 function isMediaMessage(message: Message): boolean {
@@ -1551,6 +1589,19 @@ async function sendMediaMessage() {
                     {{ btn.title }}
                   </div>
                 </div>
+                <!-- CTA URL button - WhatsApp style -->
+                <a
+                  v-if="getCTAUrlData(message)"
+                  :href="getCTAUrlData(message)?.url"
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  class="interactive-buttons mt-2 -mx-2 -mb-1.5 border-t block"
+                >
+                  <div class="py-2 text-sm text-center font-medium cursor-pointer flex items-center justify-center gap-1.5">
+                    <ExternalLink class="h-3.5 w-3.5" />
+                    {{ getCTAUrlData(message)?.button_text }}
+                  </div>
+                </a>
                 <!-- Time for messages without text content -->
                 <span v-if="!getMessageContent(message) && !(isMediaMessage(message) && !message.media_url)" class="chat-bubble-time block clear-both">
                   <span>{{ formatMessageTime(message.created_at) }}</span>

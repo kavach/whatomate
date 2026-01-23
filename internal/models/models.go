@@ -271,6 +271,7 @@ type WhatsAppAccount struct {
 	PhoneID            string    `gorm:"size:100;not null" json:"phone_id"`
 	BusinessID         string    `gorm:"size:100;not null" json:"business_id"`
 	AccessToken        string    `gorm:"type:text;not null" json:"-"` // encrypted
+	AppSecret          string    `gorm:"size:255" json:"-"`           // Meta App Secret for webhook signature verification
 	WebhookVerifyToken string    `gorm:"size:255" json:"webhook_verify_token"`
 	APIVersion         string    `gorm:"size:20;default:'v21.0'" json:"api_version"`
 	IsDefaultIncoming  bool      `gorm:"default:false" json:"is_default_incoming"`
@@ -290,7 +291,7 @@ func (WhatsAppAccount) TableName() string {
 type Contact struct {
 	BaseModel
 	OrganizationID     uuid.UUID  `gorm:"type:uuid;index;not null" json:"organization_id"`
-	PhoneNumber        string     `gorm:"size:20;not null" json:"phone_number"`
+	PhoneNumber        string     `gorm:"size:50;not null" json:"phone_number"`
 	ProfileName        string     `gorm:"size:255" json:"profile_name"`
 	WhatsAppAccount    string     `gorm:"size:100;index" json:"whatsapp_account"` // References WhatsAppAccount.Name
 	AssignedUserID     *uuid.UUID `gorm:"type:uuid;index" json:"assigned_user_id,omitempty"`
