@@ -1,0 +1,33 @@
+name: Deploy Whatomate
+
+on:
+  workflow_run:
+    workflows: ["Build Whatomate"]
+    types: [completed]
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: whatomate-binary
+
+      - name: Copy binary to VM
+        uses: appleboy/scp-action@v0.1.7
+        with:
+          host: ${{ secrets.E2E_HOST }}
+          username: ${{ secrets.E2E_USER }}
+          key: ${{ secrets.E2E_SSH_KEY }}
+          source: whatomate
+          target: /opt/whatomate/bin/
+
+      - name: Restart service
+        uses: appleboy/ssh-action@v1
+        with:
+          host: ${{ secrets.E2E_HOST }}
+          username: ${{ secrets.E2E_USER }}
+          key: ${{ secrets.E2E_SSH_KEY }}
+          script: |
+            sudo systemctl restart whatomate

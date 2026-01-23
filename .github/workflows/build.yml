@@ -1,0 +1,26 @@
+name: Build Whatomate
+
+on:
+  push:
+    branches: [release]
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.24'
+
+      - name: Build production binary
+        run: |
+          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
+          go build -o whatomate ./cmd/whatomate
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: whatomate-binary
+          path: whatomate
