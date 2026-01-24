@@ -1,26 +1,53 @@
-name: Build Whatomate
+name: Build Whatomate (Production)
 
 on:
   push:
     branches: [release]
+  workflow_dispatch:
 
 jobs:
   build:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/checkout@v4
+      # 1. Checkout code
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0   # needed for git describe (VERSION)
 
-      - uses: actions/setup-go@v5
+      # 2. Setup Go
+      - name: Setup Go
+        uses: actions/setup-go@v5
         with:
           go-version: '1.24'
 
-      - name: Build production binary
-        run: |
-          CGO_ENABLED=0 GOOS=linux GOARCH=amd64 \
-          go build -o whatomate ./cmd/whatomate
-
-      - uses: actions/upload-artifact@v4
+      # 3. Setup Node.js (for frontend build)
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
         with:
-          name: whatomate-binary
+          node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: frontend/package-lock.json
+
+      # 4. Install frontend dependencies
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install
+
+      # 5. Build production binary (frontend + embed + ldflags)
+      - name: Build production binary
+        run: make build-prod
+
+      # 6. Verify binary exists
+      - name: Verify binary
+        run: |
+          ls -lh whatomate
+          file whatomate
+
+      # 7. Upload binary artifact
+      - name: Upload production binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: whatomate-linux-amd64
           path: whatomate
