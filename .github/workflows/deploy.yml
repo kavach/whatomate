@@ -1,8 +1,7 @@
 name: Deploy Whatomate to E2E VM
 
 on:
-  push:
-    branches: [release]
+  workflow_dispatch:
 
 jobs:
   deploy:
