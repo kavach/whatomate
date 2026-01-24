@@ -2,20 +2,19 @@ name: Deploy Whatomate to E2E VM
 
 on:
   workflow_dispatch:
-  workflow_run:
-    workflows: ["Build Whatomate (Production)"]
-    types:
-      - completed
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download build artifact
-        uses: actions/download-artifact@v4
+      - name: Download latest production artifact
+        uses: dawidd6/action-download-artifact@v3
         with:
+          workflow: build.yml
           name: whatomate-linux-amd64
+          branch: release
+          path: .
 
       - name: Set executable permission
         run: chmod +x whatomate
