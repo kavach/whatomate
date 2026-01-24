@@ -1,4 +1,4 @@
-name: Deploy Whatomate to E2E VM
+name: Deploy Whatomate to E2E VM 2
 
 on:
   workflow_dispatch:
