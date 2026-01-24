@@ -1,20 +1,26 @@
-name: Deploy Whatomate
+name: Deploy Whatomate to E2E VM
 
 on:
+  workflow_dispatch:
   workflow_run:
-    workflows: ["Build Whatomate"]
-    types: [completed]
+    workflows: ["Build Whatomate (Production)"]
+    types:
+      - completed
 
 jobs:
   deploy:
     runs-on: ubuntu-latest
 
     steps:
-      - uses: actions/download-artifact@v4
+      - name: Download build artifact
+        uses: actions/download-artifact@v4
         with:
-          name: whatomate-binary
+          name: whatomate-linux-amd64
 
-      - name: Copy binary to VM
+      - name: Set executable permission
+        run: chmod +x whatomate
+
+      - name: Upload binary to VM
         uses: appleboy/scp-action@v0.1.7
         with:
           host: ${{ secrets.E2E_HOST }}
@@ -23,11 +29,13 @@ jobs:
           source: whatomate
           target: /opt/whatomate/bin/
 
-      - name: Restart service
-        uses: appleboy/ssh-action@v1
+      - name: Restart Whatomate services
+        uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.E2E_HOST }}
           username: ${{ secrets.E2E_USER }}
           key: ${{ secrets.E2E_SSH_KEY }}
           script: |
+            sudo systemctl daemon-reload
             sudo systemctl restart whatomate
+            sudo systemctl restart whatomate-worker
