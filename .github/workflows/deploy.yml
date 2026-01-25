@@ -28,13 +28,35 @@ jobs:
           source: whatomate
           target: /opt/whatomate/bin/
 
-      - name: Restart Whatomate services
+      - name: Blue-Green switch
         uses: appleboy/ssh-action@v1.0.3
         with:
           host: ${{ secrets.E2E_HOST }}
           username: ${{ secrets.E2E_USER }}
           key: ${{ secrets.E2E_SSH_KEY }}
           script: |
-            sudo systemctl daemon-reload
-            sudo systemctl restart whatomate
-            sudo systemctl restart whatomate-worker
+            set -e
+
+            ACTIVE=$(cat /opt/whatomate/active_color)
+            if [ "$ACTIVE" = "blue" ]; then
+              NEW=green
+              OLD=blue
+              PORT=8082
+            else
+              NEW=blue
+              OLD=green
+              PORT=8081
+            fi
+
+            echo "Deploying $NEW"
+
+            sudo systemctl start whatomate-$NEW
+            sleep 5
+
+            curl -f http://127.0.0.1:$PORT/health
+
+            echo $NEW | sudo tee /opt/whatomate/active_color
+
+            sudo caddy reload
+
+            sudo systemctl stop whatomate-$OLD
