@@ -38,6 +38,7 @@ jobs:
             set -e
             CADDYFILE=/etc/caddy/Caddyfile
             ACTIVE=$(cat /opt/whatomate/active_color)
+            echo "Active Deployment : $ACTIVE"
             if [ "$ACTIVE" = "blue" ]; then
               NEW=green
               OLD=blue
@@ -73,8 +74,18 @@ jobs:
 
       - name: Delete artifact from GitHub Actions storage
         if: success()
-        uses: geekyeggo/delete-artifact@v4
-        with:
-          name: whatomate-linux-amd64
-          workflow: build.yml
-          token: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          # Get the artifact ID for the specific artifact name
+          ARTIFACTS=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts?per_page=100")
+
+          ARTIFACT_ID=$(echo "$ARTIFACTS" | jq -r '.artifacts[] | select(.name=="whatomate-linux-amd64") | .id' | head -1)
+
+          if [ -n "$ARTIFACT_ID" ] && [ "$ARTIFACT_ID" != "null" ]; then
+            echo "Deleting artifact ID: $ARTIFACT_ID"
+            curl -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
+              "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID"
+            echo "Artifact deleted successfully"
+          else
+            echo "Artifact not found or already deleted"
+          fi
