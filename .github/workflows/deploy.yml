@@ -55,8 +55,11 @@ jobs:
 
             curl -f http://127.0.0.1:$PORT/health
 
-            echo $NEW | sudo tee /opt/whatomate/active_color
+            echo "reverse_proxy 127.0.0.1:$PORT { health_uri /health }" \
+              | sudo tee /etc/caddy/upstream.caddy
 
             sudo caddy reload --config /etc/caddy/Caddyfile
+
+            echo "$NEW" | sudo tee /opt/whatomate/active_color
 
             sudo systemctl stop whatomate-$OLD
