@@ -57,6 +57,6 @@ jobs:
 
             echo $NEW | sudo tee /opt/whatomate/active_color
 
-            sudo caddy reload
+            sudo caddy reload --config /etc/caddy/Caddyfile
 
             sudo systemctl stop whatomate-$OLD
