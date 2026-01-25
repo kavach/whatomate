@@ -66,3 +66,15 @@ jobs:
 
             sudo systemctl stop whatomate-$OLD
             echo "Deployment complete. Active color: $NEW"
+
+      - name: Cleanup downloaded artifact
+        if: success()
+        run: rm -f whatomate
+
+      - name: Delete artifact from GitHub Actions storage
+        if: success()
+        uses: geekyeggo/delete-artifact@v4
+        with:
+          name: whatomate-linux-amd64
+          workflow: build.yml
+          token: ${{ secrets.GITHUB_TOKEN }}
