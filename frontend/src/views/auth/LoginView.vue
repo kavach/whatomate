@@ -1,15 +1,17 @@
 <script setup lang="ts">
-import { ref, onMounted } from "vue";
-import { useRouter, useRoute } from "vue-router";
-import { useAuthStore } from "@/stores/auth";
-import { api } from "@/services/api";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
-import { toast } from "vue-sonner";
-import { MessageSquare, Loader2 } from "lucide-vue-next";
-import logoImage from "@/assets/bharatgas-logo.png";
+import { ref, onMounted } from 'vue'
+import { useRouter, useRoute } from 'vue-router'
+import { useI18n } from 'vue-i18n'
+import { useAuthStore } from '@/stores/auth'
+import { api } from '@/services/api'
+import { Button } from '@/components/ui/button'
+import { Input } from '@/components/ui/input'
+import { Label } from '@/components/ui/label'
+import { Separator } from '@/components/ui/separator'
+import { toast } from 'vue-sonner'
+import { MessageSquare, Loader2 } from 'lucide-vue-next'
+
+const { t } = useI18n()
 
 interface SSOProvider {
   provider: string;
@@ -72,21 +74,21 @@ onMounted(async () => {
 
 const handleLogin = async () => {
   if (!email.value || !password.value) {
-    toast.error("Please enter email and password");
-    return;
+    toast.error(t('auth.enterEmailPassword'))
+    return
   }
 
   isLoading.value = true;
 
   try {
-    await authStore.login(email.value, password.value);
-    toast.success("Login successful");
+    await authStore.login(email.value, password.value)
+    toast.success(t('auth.loginSuccess'))
 
     const redirect = route.query.redirect as string;
     router.push(redirect || "/");
   } catch (error: any) {
-    const message = error.response?.data?.message || "Invalid credentials";
-    toast.error(message);
+    const message = error.response?.data?.message || t('auth.invalidCredentials')
+    toast.error(message)
   } finally {
     isLoading.value = false;
   }
@@ -113,34 +115,30 @@ const initiateSSO = (provider: string) => {
           Welcome to BGS Chatbot Platform
         </h2>
         <p class="text-white/50 light:text-gray-500">
-          Enter your credentials to access your account
+          {{ $t('auth.welcomeSubtitle') }}
         </p>
       </div>
 
       <form @submit.prevent="handleLogin">
         <div class="px-8 pb-4 space-y-4">
           <div class="space-y-2">
-            <Label for="email" class="text-white/70 light:text-gray-700"
-              >Email</Label
-            >
+            <Label for="email" class="text-white/70 light:text-gray-700">{{ $t('common.email') }}</Label>
             <Input
               id="email"
               v-model="email"
               type="email"
-              placeholder="name@example.com"
+              :placeholder="$t('auth.emailPlaceholder')"
               :disabled="isLoading"
               autocomplete="email"
             />
           </div>
           <div class="space-y-2">
-            <Label for="password" class="text-white/70 light:text-gray-700"
-              >Password</Label
-            >
+            <Label for="password" class="text-white/70 light:text-gray-700">{{ $t('auth.password') }}</Label>
             <Input
               id="password"
               v-model="password"
               type="password"
-              placeholder="Enter your password"
+              :placeholder="$t('auth.passwordPlaceholder')"
               :disabled="isLoading"
               autocomplete="current-password"
             />
@@ -151,7 +149,7 @@ const initiateSSO = (provider: string) => {
             :disabled="isLoading"
           >
             <Loader2 v-if="isLoading" class="mr-2 h-4 w-4 animate-spin" />
-            Sign in
+            {{ $t('auth.signIn') }}
           </Button>
         </div>
       </form>
@@ -160,10 +158,8 @@ const initiateSSO = (provider: string) => {
       <div v-if="ssoProviders.length > 0" class="px-8 pb-4 space-y-3">
         <div class="relative my-2">
           <Separator class="bg-white/[0.08] light:bg-gray-200" />
-          <span
-            class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-[#0a0a0b] light:bg-white px-2 text-xs text-white/40 light:text-gray-500"
-          >
-            or continue with
+          <span class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-[#0a0a0b] light:bg-white px-2 text-xs text-white/40 light:text-gray-500">
+            {{ $t('auth.orContinueWith') }}
           </span>
         </div>
 
@@ -186,12 +182,9 @@ const initiateSSO = (provider: string) => {
 
       <div class="px-8 pb-8">
         <p class="text-sm text-center text-white/40 light:text-gray-500">
-          Don't have an account?
-          <RouterLink
-            to="/register"
-            class="text-emerald-400 light:text-emerald-600 hover:underline"
-          >
-            Sign up
+          {{ $t('auth.noAccount') }}
+          <RouterLink to="/register" class="text-emerald-400 light:text-emerald-600 hover:underline">
+            {{ $t('auth.signUp') }}
           </RouterLink>
         </p>
       </div>
