@@ -392,6 +392,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/auth/login", app.Login)
 	g.POST("/api/auth/register", app.Register)
 	g.POST("/api/auth/refresh", app.RefreshToken)
+	g.POST("/api/auth/switch-org", app.SwitchOrg)
 
 	// SSO routes (public)
 	g.GET("/api/auth/sso/providers", app.GetPublicSSOProviders)
@@ -453,6 +454,7 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.PUT("/api/me/settings", app.UpdateCurrentUserSettings)
 	g.PUT("/api/me/password", app.ChangePassword)
 	g.PUT("/api/me/availability", app.UpdateAvailability)
+	g.GET("/api/me/organizations", app.ListMyOrganizations)
 
 	// User Management (admin only - enforced by middleware)
 	g.GET("/api/users", app.ListUsers)
@@ -516,6 +518,12 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.POST("/api/messages/template", app.SendTemplateMessage)
 	g.POST("/api/messages/media", app.SendMediaMessage)
 	g.PUT("/api/messages/{id}/read", app.MarkMessageRead)
+
+	// Conversation Notes
+	g.GET("/api/contacts/{id}/notes", app.ListConversationNotes)
+	g.POST("/api/contacts/{id}/notes", app.CreateConversationNote)
+	g.PUT("/api/contacts/{id}/notes/{note_id}", app.UpdateConversationNote)
+	g.DELETE("/api/contacts/{id}/notes/{note_id}", app.DeleteConversationNote)
 
 	// Media (serves media files for messages, auth-protected)
 	g.GET("/api/media/{message_id}", app.ServeMedia)
@@ -641,9 +649,14 @@ func setupRoutes(g *fastglue.Fastglue, app *handlers.App, lo logf.Logger, basePa
 	g.GET("/api/org/settings", app.GetOrganizationSettings)
 	g.PUT("/api/org/settings", app.UpdateOrganizationSettings)
 
-	// Organizations (super admin only)
+	// Organizations
 	g.GET("/api/organizations", app.ListOrganizations)
+	g.POST("/api/organizations", app.CreateOrganization)
 	g.GET("/api/organizations/current", app.GetCurrentOrganization)
+	g.GET("/api/organizations/members", app.ListOrganizationMembers)
+	g.POST("/api/organizations/members", app.AddOrganizationMember)
+	g.PUT("/api/organizations/members/{member_id}", app.UpdateOrganizationMemberRole)
+	g.DELETE("/api/organizations/members/{member_id}", app.RemoveOrganizationMember)
 
 	// SSO Settings (admin only - enforced by middleware)
 	g.GET("/api/settings/sso", app.GetSSOSettings)
