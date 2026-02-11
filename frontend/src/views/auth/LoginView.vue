@@ -1,18 +1,18 @@
 <script setup lang="ts">
-import { ref, onMounted } from 'vue'
-import { useRouter, useRoute } from 'vue-router'
-import { useI18n } from 'vue-i18n'
-import { useAuthStore } from '@/stores/auth'
-import { api } from '@/services/api'
-import { Button } from '@/components/ui/button'
-import { Input } from '@/components/ui/input'
-import { Label } from '@/components/ui/label'
-import { Separator } from '@/components/ui/separator'
-import { toast } from 'vue-sonner'
-import { MessageSquare, Loader2 } from 'lucide-vue-next'
-import logoImage from '../../../public/favicon.ico'
+import { ref, onMounted } from "vue";
+import { useRouter, useRoute } from "vue-router";
+import { useI18n } from "vue-i18n";
+import { useAuthStore } from "@/stores/auth";
+import { api } from "@/services/api";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Separator } from "@/components/ui/separator";
+import { toast } from "vue-sonner";
+import { MessageSquare, Loader2 } from "lucide-vue-next";
+import logoImage from "../../../public/favicon.ico";
 
-const { t } = useI18n()
+const { t } = useI18n();
 
 interface SSOProvider {
   provider: string;
@@ -75,29 +75,30 @@ onMounted(async () => {
 
 const handleLogin = async () => {
   if (!email.value || !password.value) {
-    toast.error(t('auth.enterEmailPassword'))
-    return
+    toast.error(t("auth.enterEmailPassword"));
+    return;
   }
 
   isLoading.value = true;
 
   try {
-    await authStore.login(email.value, password.value)
-    toast.success(t('auth.loginSuccess'))
+    await authStore.login(email.value, password.value);
+    toast.success(t("auth.loginSuccess"));
 
     const redirect = route.query.redirect as string;
     router.push(redirect || "/");
   } catch (error: any) {
-    const message = error.response?.data?.message || t('auth.invalidCredentials')
-    toast.error(message)
+    const message =
+      error.response?.data?.message || t("auth.invalidCredentials");
+    toast.error(message);
   } finally {
     isLoading.value = false;
   }
 };
 
 const initiateSSO = (provider: string) => {
-  const baseUrl = import.meta.env.VITE_API_URL || "";
-  window.location.href = `${baseUrl}/auth/sso/${provider}/init`;
+  const basePath = ((window as any).__BASE_PATH__ ?? "").replace(/\/$/, "");
+  window.location.href = `${basePath}/api/auth/sso/${provider}/init`;
 };
 </script>
 
@@ -116,14 +117,16 @@ const initiateSSO = (provider: string) => {
           Welcome to BGS Chatbot Platform
         </h2>
         <p class="text-white/50 light:text-gray-500">
-          {{ $t('auth.welcomeSubtitle') }}
+          {{ $t("auth.welcomeSubtitle") }}
         </p>
       </div>
 
       <form @submit.prevent="handleLogin">
         <div class="px-8 pb-4 space-y-4">
           <div class="space-y-2">
-            <Label for="email" class="text-white/70 light:text-gray-700">{{ $t('common.email') }}</Label>
+            <Label for="email" class="text-white/70 light:text-gray-700">{{
+              $t("common.email")
+            }}</Label>
             <Input
               id="email"
               v-model="email"
@@ -134,7 +137,9 @@ const initiateSSO = (provider: string) => {
             />
           </div>
           <div class="space-y-2">
-            <Label for="password" class="text-white/70 light:text-gray-700">{{ $t('auth.password') }}</Label>
+            <Label for="password" class="text-white/70 light:text-gray-700">{{
+              $t("auth.password")
+            }}</Label>
             <Input
               id="password"
               v-model="password"
@@ -150,7 +155,7 @@ const initiateSSO = (provider: string) => {
             :disabled="isLoading"
           >
             <Loader2 v-if="isLoading" class="mr-2 h-4 w-4 animate-spin" />
-            {{ $t('auth.signIn') }}
+            {{ $t("auth.signIn") }}
           </Button>
         </div>
       </form>
@@ -159,8 +164,10 @@ const initiateSSO = (provider: string) => {
       <div v-if="ssoProviders.length > 0" class="px-8 pb-4 space-y-3">
         <div class="relative my-2">
           <Separator class="bg-white/[0.08] light:bg-gray-200" />
-          <span class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-[#0a0a0b] light:bg-white px-2 text-xs text-white/40 light:text-gray-500">
-            {{ $t('auth.orContinueWith') }}
+          <span
+            class="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 bg-[#0a0a0b] light:bg-white px-2 text-xs text-white/40 light:text-gray-500"
+          >
+            {{ $t("auth.orContinueWith") }}
           </span>
         </div>
 
@@ -183,9 +190,12 @@ const initiateSSO = (provider: string) => {
 
       <div class="px-8 pb-8">
         <p class="text-sm text-center text-white/40 light:text-gray-500">
-          {{ $t('auth.noAccount') }}
-          <RouterLink to="/register" class="text-emerald-400 light:text-emerald-600 hover:underline">
-            {{ $t('auth.signUp') }}
+          {{ $t("auth.noAccount") }}
+          <RouterLink
+            to="/register"
+            class="text-emerald-400 light:text-emerald-600 hover:underline"
+          >
+            {{ $t("auth.signUp") }}
           </RouterLink>
         </p>
       </div>
