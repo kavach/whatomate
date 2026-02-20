@@ -248,6 +248,7 @@
     "away": "Away",
     "profile": "Profile",
     "theme": "Theme",
+    "language": "Language",
     "logOut": "Log out",
     "availableDesc": "You are now available to receive transfers",
     "awayDesc": "You will not receive new transfer assignments",
@@ -370,7 +371,16 @@
     "noteUpdateFailed": "Failed to update note",
     "noteDeleted": "Note deleted",
     "noteDeleteFailed": "Failed to delete note",
-    "confirmDeleteNote": "Are you sure you want to delete this note?"
+    "confirmDeleteNote": "Are you sure you want to delete this note?",
+    "searchTemplates": "Search templates...",
+    "fillParameters": "Fill Parameters",
+    "noApprovedTemplates": "No approved templates",
+    "templateSent": "Template sent",
+    "templateSendFailed": "Failed to send template",
+    "parameterRequired": "All parameters are required",
+    "preview": "Preview",
+    "serviceWindowExpired": "The 24-hour messaging window has expired. Only template messages can be sent until the customer replies.",
+    "sendTemplateAction": "Send Template"
   },
   "contacts": {
     "title": "Contacts",

@@ -12,6 +12,8 @@ export interface Contact {
   tags: string[]
   metadata: Record<string, any>
   last_message_at?: string
+  last_inbound_at?: string
+  service_window_open?: boolean
   unread_count: number
   assigned_user_id?: string
   whatsapp_account?: string
@@ -127,10 +129,6 @@ export const useContactsStore = defineStore('contacts', () => {
     }
   }
 
-  function setContactsLimit(limit: number) {
-    contactsLimit.value = limit
-  }
-
   async function loadMoreContacts() {
     if (isLoadingMoreContacts.value || !hasMoreContacts.value) return
 
@@ -229,28 +227,34 @@ export const useContactsStore = defineStore('contacts', () => {
     }
   }
 
+  async function sendTemplate(
+    contactId: string,
+    templateName: string,
+    templateParams?: Record<string, string>,
+    accountName?: string
+  ) {
+    try {
+      const response = await messagesService.sendTemplate(contactId, {
+        template_name: templateName,
+        template_params: templateParams,
+        account_name: accountName
+      })
+      const data = response.data.data || response.data
+      // Use addMessage which has duplicate checking (WebSocket may also broadcast this)
+      addMessage(data)
+      return data
+    } catch (error) {
+      console.error('Failed to send template:', error)
+      throw error
+    }
+  }
+
   function setReplyingTo(message: Message | null) {
     replyingTo.value = message
   }
 
   function clearReplyingTo() {
     replyingTo.value = null
-  }
-
-  async function sendTemplate(contactId: string, templateName: string, components?: any[]) {
-    try {
-      const response = await messagesService.sendTemplate(contactId, {
-        template_name: templateName,
-        components
-      })
-      const newMessage = response.data
-      // Use addMessage which has duplicate checking (WebSocket may also broadcast this)
-      addMessage(newMessage)
-      return newMessage
-    } catch (error) {
-      console.error('Failed to send template:', error)
-      throw error
-    }
   }
 
   function addMessage(message: Message) {
@@ -260,7 +264,14 @@ export const useContactsStore = defineStore('contacts', () => {
       contact.last_message_at = message.created_at
       if (message.direction === 'incoming') {
         contact.unread_count++
+        contact.last_inbound_at = message.created_at
+        contact.service_window_open = true
       }
+    }
+    // Also update currentContact if it matches
+    if (currentContact.value && currentContact.value.id === message.contact_id && message.direction === 'incoming') {
+      currentContact.value.last_inbound_at = message.created_at
+      currentContact.value.service_window_open = true
     }
 
     // Skip adding to messages array if account filter is active and doesn't match
@@ -275,10 +286,14 @@ export const useContactsStore = defineStore('contacts', () => {
     }
   }
 
-  function updateMessageStatus(messageId: string, status: string) {
-    const message = messages.value.find(m => m.id === messageId)
-    if (message) {
-      message.status = status
+  function updateMessageStatus(messageId: string, status: string, errorMessage?: string) {
+    const index = messages.value.findIndex(m => m.id === messageId)
+    if (index !== -1) {
+      messages.value[index] = {
+        ...messages.value[index],
+        status,
+        ...(errorMessage ? { error_message: errorMessage } : {})
+      }
     }
   }
 
@@ -333,11 +348,9 @@ export const useContactsStore = defineStore('contacts', () => {
     filteredContacts,
     sortedContacts,
     // Contacts pagination
-    contactsLimit,
     contactsTotal,
     hasMoreContacts,
     isLoadingMoreContacts,
-    setContactsLimit,
     fetchContacts,
     loadMoreContacts,
     // Other
