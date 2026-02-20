@@ -36,6 +36,8 @@ type ContactResponse struct {
 	UnreadCount        int        `json:"unread_count"`
 	AssignedUserID     *uuid.UUID `json:"assigned_user_id,omitempty"`
 	WhatsAppAccount    string     `json:"whatsapp_account,omitempty"`
+	LastInboundAt      *time.Time `json:"last_inbound_at,omitempty"`
+	ServiceWindowOpen  bool       `json:"service_window_open"`
 	CreatedAt          time.Time  `json:"created_at"`
 	UpdatedAt          time.Time  `json:"updated_at"`
 }
@@ -169,6 +171,8 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 			profileName = MaskIfPhoneNumber(profileName)
 		}
 
+		serviceWindowOpen := c.LastInboundAt != nil && time.Since(*c.LastInboundAt) < 24*time.Hour
+
 		response[i] = ContactResponse{
 			ID:                 c.ID,
 			PhoneNumber:        phoneNumber,
@@ -182,6 +186,8 @@ func (a *App) ListContacts(r *fastglue.Request) error {
 			UnreadCount:        int(unreadCount),
 			AssignedUserID:     c.AssignedUserID,
 			WhatsAppAccount:    c.WhatsAppAccount,
+			LastInboundAt:      c.LastInboundAt,
+			ServiceWindowOpen:  serviceWindowOpen,
 			CreatedAt:          c.CreatedAt,
 			UpdatedAt:          c.UpdatedAt,
 		}
@@ -470,8 +476,7 @@ func (a *App) markMessagesAsRead(orgID uuid.UUID, contactID uuid.UUID, contact *
 	a.DB.Model(contact).Update("is_read", true)
 
 	if len(unreadMessages) > 0 && contact.WhatsAppAccount != "" {
-		var account models.WhatsAppAccount
-		if err := a.DB.Where("organization_id = ? AND name = ?", orgID, contact.WhatsAppAccount).First(&account).Error; err == nil {
+		if account, err := a.resolveWhatsAppAccount(orgID, contact.WhatsAppAccount); err == nil {
 			if account.AutoReadReceipt {
 				a.wg.Add(1)
 				go func() {
@@ -480,7 +485,7 @@ func (a *App) markMessagesAsRead(orgID uuid.UUID, contactID uuid.UUID, contact *
 					ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 					defer cancel()
 
-					waAccount := a.toWhatsAppAccount(&account)
+					waAccount := a.toWhatsAppAccount(account)
 					for _, msg := range unreadMessages {
 						// Check if context was cancelled
 						if ctx.Err() != nil {
@@ -652,6 +657,7 @@ func (a *App) resolveWhatsAppAccount(orgID uuid.UUID, accountName string) (*mode
 		if err := a.DB.Where("name = ? AND organization_id = ?", accountName, orgID).First(&account).Error; err != nil {
 			return nil, fmt.Errorf("WhatsApp account not found")
 		}
+		a.decryptAccountSecrets(&account)
 		return &account, nil
 	}
 
@@ -662,7 +668,18 @@ func (a *App) resolveWhatsAppAccount(orgID uuid.UUID, accountName string) (*mode
 			return nil, fmt.Errorf("no WhatsApp account configured")
 		}
 	}
+	a.decryptAccountSecrets(&account)
 	return &account, nil
+}
+
+// resolveWhatsAppAccountByID fetches a WhatsApp account by UUID and org, decrypts secrets.
+func (a *App) resolveWhatsAppAccountByID(r *fastglue.Request, id, orgID uuid.UUID) (*models.WhatsAppAccount, error) {
+	account, err := findByIDAndOrg[models.WhatsAppAccount](a.DB, r, id, orgID, "Account")
+	if err != nil {
+		return nil, err
+	}
+	a.decryptAccountSecrets(account)
+	return account, nil
 }
 
 func truncateString(s string, maxLen int) string {
@@ -1497,6 +1514,9 @@ func (a *App) buildContactResponse(contact *models.Contact, orgID uuid.UUID) Con
 		profileName = MaskIfPhoneNumber(profileName)
 	}
 
+	// 24-hour service window: open if customer messaged within the last 24 hours.
+	serviceWindowOpen := contact.LastInboundAt != nil && time.Since(*contact.LastInboundAt) < 24*time.Hour
+
 	return ContactResponse{
 		ID:                 contact.ID,
 		PhoneNumber:        phoneNumber,
@@ -1510,6 +1530,8 @@ func (a *App) buildContactResponse(contact *models.Contact, orgID uuid.UUID) Con
 		UnreadCount:        int(unreadCount),
 		AssignedUserID:     contact.AssignedUserID,
 		WhatsAppAccount:    contact.WhatsAppAccount,
+		LastInboundAt:      contact.LastInboundAt,
+		ServiceWindowOpen:  serviceWindowOpen,
 		CreatedAt:          contact.CreatedAt,
 		UpdatedAt:          contact.UpdatedAt,
 	}
