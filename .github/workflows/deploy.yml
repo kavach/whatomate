@@ -44,7 +44,7 @@ jobs:
               NEW=blue
             fi
             echo "Running database migrations..."
-            /opt/whatomate/bin/whatomate server -config /opt/whatomate/config-$NEW.toml -migrate
+            /opt/whatomate/bin/whatomate server -config /opt/whatomate/config/config-$NEW.toml -migrate
             echo "Migrations completed successfully."
 
       - name: Blue-Green switch
