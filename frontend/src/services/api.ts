@@ -571,7 +571,16 @@ export const organizationService = {
     calling_enabled?: boolean
     max_call_duration?: number
     transfer_timeout_secs?: number
-  }) => api.put('/org/settings', data)
+    hold_music_file?: string
+    ringback_file?: string
+  }) => api.put('/org/settings', data),
+  uploadOrgAudio: (file: File, type: 'hold_music' | 'ringback') => {
+    const formData = new FormData()
+    formData.append('file', file)
+    return api.post(`/org/audio?type=${type}`, formData, {
+      headers: { 'Content-Type': 'multipart/form-data' }
+    })
+  }
 }
 
 // Organizations
@@ -826,7 +835,7 @@ export interface CallLog {
   whatsapp_call_id: string
   caller_phone: string
   direction: 'incoming' | 'outgoing'
-  status: 'ringing' | 'answered' | 'completed' | 'missed' | 'rejected' | 'failed' | 'initiating' | 'accepted'
+  status: 'ringing' | 'answered' | 'completed' | 'missed' | 'rejected' | 'failed' | 'initiating' | 'accepted' | 'transferring'
   duration: number
   ivr_flow_id?: string
   ivr_path?: Record<string, any>
@@ -834,6 +843,7 @@ export interface CallLog {
   started_at?: string
   answered_at?: string
   ended_at?: string
+  disconnected_by?: 'client' | 'agent' | 'system'
   error_message?: string
   recording_s3_key?: string
   recording_duration?: number

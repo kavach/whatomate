@@ -19,6 +19,8 @@ type OrganizationSettings struct {
 	CallingEnabled      bool   `json:"calling_enabled"`
 	MaxCallDuration     int    `json:"max_call_duration"`
 	TransferTimeoutSecs int    `json:"transfer_timeout_secs"`
+	HoldMusicFile       string `json:"hold_music_file"`
+	RingbackFile        string `json:"ringback_file"`
 }
 
 // GetOrganizationSettings returns the organization settings
@@ -41,6 +43,8 @@ func (a *App) GetOrganizationSettings(r *fastglue.Request) error {
 		CallingEnabled:      false,
 		MaxCallDuration:     callingConfigDefault(a.Config.Calling.MaxCallDuration, 3600),
 		TransferTimeoutSecs: callingConfigDefault(a.Config.Calling.TransferTimeoutSecs, 60),
+		HoldMusicFile:       a.Config.Calling.HoldMusicFile,
+		RingbackFile:        a.Config.Calling.RingbackFile,
 	}
 
 	if org.Settings != nil {
@@ -61,6 +65,12 @@ func (a *App) GetOrganizationSettings(r *fastglue.Request) error {
 		}
 		if v, ok := org.Settings["transfer_timeout_secs"].(float64); ok && v > 0 {
 			settings.TransferTimeoutSecs = int(v)
+		}
+		if v, ok := org.Settings["hold_music_file"].(string); ok && v != "" {
+			settings.HoldMusicFile = v
+		}
+		if v, ok := org.Settings["ringback_file"].(string); ok && v != "" {
+			settings.RingbackFile = v
 		}
 	}
 
@@ -85,6 +95,8 @@ func (a *App) UpdateOrganizationSettings(r *fastglue.Request) error {
 		CallingEnabled      *bool   `json:"calling_enabled"`
 		MaxCallDuration     *int    `json:"max_call_duration"`
 		TransferTimeoutSecs *int    `json:"transfer_timeout_secs"`
+		HoldMusicFile       *string `json:"hold_music_file"`
+		RingbackFile        *string `json:"ringback_file"`
 	}
 
 	if err := json.Unmarshal(r.RequestCtx.PostBody(), &req); err != nil {
@@ -119,6 +131,12 @@ func (a *App) UpdateOrganizationSettings(r *fastglue.Request) error {
 	if req.TransferTimeoutSecs != nil && *req.TransferTimeoutSecs > 0 {
 		org.Settings["transfer_timeout_secs"] = *req.TransferTimeoutSecs
 	}
+	if req.HoldMusicFile != nil {
+		org.Settings["hold_music_file"] = *req.HoldMusicFile
+	}
+	if req.RingbackFile != nil {
+		org.Settings["ringback_file"] = *req.RingbackFile
+	}
 	if req.Name != nil && *req.Name != "" {
 		org.Name = *req.Name
 	}
@@ -148,6 +166,15 @@ func (a *App) IsCallingEnabledForOrg(orgID interface{}) bool {
 		}
 	}
 	return false
+}
+
+// requireCallingEnabled checks if calling is enabled for the org and returns an error
+// envelope if not. Returns nil when calling is enabled and the handler can proceed.
+func (a *App) requireCallingEnabled(r *fastglue.Request, orgID uuid.UUID) error {
+	if !a.IsCallingEnabledForOrg(orgID) {
+		return r.SendErrorEnvelope(fasthttp.StatusServiceUnavailable, "Calling is not enabled for this organization", nil, "")
+	}
+	return nil
 }
 
 // GetOrgCallingConfig returns org-level calling config values, falling back to global defaults.
@@ -212,6 +239,15 @@ func MaskIfPhoneNumber(s string) string {
 		return MaskPhoneNumber(s)
 	}
 	return s
+}
+
+// MaskContactFields conditionally masks a profile name and phone number
+// if phone masking is enabled for the given organization.
+func (a *App) MaskContactFields(orgID interface{}, profileName, phoneNumber string) (string, string) {
+	if a.ShouldMaskPhoneNumbers(orgID) {
+		return MaskIfPhoneNumber(profileName), MaskPhoneNumber(phoneNumber)
+	}
+	return profileName, phoneNumber
 }
 
 // ShouldMaskPhoneNumbers checks if phone masking is enabled for the organization
