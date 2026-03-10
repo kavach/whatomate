@@ -1,7 +1,6 @@
 package calling
 
 import (
-	"context"
 	"encoding/json"
 	"fmt"
 	"path/filepath"
@@ -9,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/pion/webrtc/v4"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 )
@@ -82,13 +82,47 @@ func (m *Manager) runIVRFlow(session *CallSession, waAccount *whatsapp.Account) 
 	session.IVRCtx = ivrCtx
 	session.mu.Unlock()
 
+	// For outgoing calls, play IVR audio on the WA track (contact hears it)
+	// and start DTMF detection on the WA remote track.
+	if session.Direction == models.CallDirectionOutgoing {
+		session.mu.Lock()
+		waRemote := session.WARemoteTrack
+		if session.DTMFBuffer == nil {
+			session.DTMFBuffer = make(chan byte, 32)
+		}
+		session.BridgeStarted = make(chan struct{})
+		session.mu.Unlock()
+		if waRemote != nil {
+			go m.consumeAudioWithDTMF(session, waRemote)
+		}
+	}
+
 	// Reuse the session's IVR player to maintain RTP sequence continuity
 	session.mu.Lock()
 	if session.IVRPlayer == nil {
-		session.IVRPlayer = NewAudioPlayer(session.AudioTrack)
+		var ivrTrack *webrtc.TrackLocalStaticRTP
+		if session.Direction == models.CallDirectionOutgoing {
+			ivrTrack = session.WAAudioTrack
+		} else {
+			ivrTrack = session.AudioTrack
+		}
+		player := NewAudioPlayer(ivrTrack)
+		// For outgoing post-call IVR, the bridge was forwarding agent audio
+		// to WAAudioTrack with high RTP seq numbers. Seed the player so its
+		// packets aren't dropped as "old" by the WA endpoint.
+		if session.LastRTPSeq > 0 {
+			player.SetSequence(session.LastRTPSeq, session.LastRTPTimestamp)
+		}
+		session.IVRPlayer = player
 	}
 	player := session.IVRPlayer
 	session.mu.Unlock()
+
+	// Brief delay to let the media path stabilize after bridge teardown
+	// (same fix as incoming calls in webrtc.go).
+	if session.Direction == models.CallDirectionOutgoing {
+		time.Sleep(500 * time.Millisecond)
+	}
 
 	m.executeNodeLoop(session, waAccount, &graph, ivrCtx, player)
 }
@@ -112,13 +146,6 @@ func (m *Manager) executeNodeLoop(session *CallSession, waAccount *whatsapp.Acco
 
 		m.log.Info("Executing IVR node", "call_id", session.ID, "node_id", node.ID, "type", node.Type, "label", node.Label)
 
-		// Record this step
-		ctx.Path = append(ctx.Path, map[string]string{
-			"node":   node.ID,
-			"type":   string(node.Type),
-			"label":  node.Label,
-		})
-
 		var outcome string
 
 		switch node.Type {
@@ -131,20 +158,61 @@ func (m *Manager) executeNodeLoop(session *CallSession, waAccount *whatsapp.Acco
 		case IVRNodeHTTPCallback:
 			outcome = m.executeHTTPCallback(session, node, ctx)
 		case IVRNodeTransfer:
-			m.executeTransfer(session, node, ctx)
-			return // terminal
+			ctx.Path = append(ctx.Path, map[string]string{
+				"node": node.ID, "type": string(node.Type), "label": node.Label,
+			})
+			outcome = m.executeTransfer(session, node, ctx, graph)
+			if outcome == "" {
+				return // terminal — no next node
+			}
+			// Transfer created a fresh IVRPlayer — pick it up so subsequent
+			// nodes use the correct RTP sequence.
+			session.mu.Lock()
+			player = session.IVRPlayer
+			session.mu.Unlock()
 		case IVRNodeGotoFlow:
+			ctx.Path = append(ctx.Path, map[string]string{
+				"node": node.ID, "type": string(node.Type), "label": node.Label,
+			})
 			m.executeGotoFlow(session, node, ctx, waAccount)
 			return // terminal (recursive call to runIVRFlow)
 		case IVRNodeTiming:
 			outcome = m.executeTiming(session, node)
 		case IVRNodeHangup:
+			ctx.Path = append(ctx.Path, map[string]string{
+				"node": node.ID, "type": string(node.Type), "label": node.Label,
+			})
 			m.executeHangup(session, node, ctx, waAccount, player)
 			return // terminal
 		default:
 			m.log.Error("Unknown IVR node type", "call_id", session.ID, "type", node.Type)
 			return
 		}
+
+		// Record this step after execution so we can include the outcome.
+		step := map[string]string{
+			"node":  node.ID,
+			"type":  string(node.Type),
+			"label": node.Label,
+		}
+
+		// For menu nodes, record the selected digit and option label
+		if node.Type == IVRNodeMenu && strings.HasPrefix(outcome, "digit:") {
+			digit := strings.TrimPrefix(outcome, "digit:")
+			step["digit"] = digit
+			if opts, ok := node.Config["options"].(map[string]interface{}); ok {
+				if optMap, ok := opts[digit].(map[string]interface{}); ok {
+					if optLabel, ok := optMap["label"].(string); ok {
+						step["option_label"] = optLabel
+					}
+				}
+			}
+		}
+		if outcome != "" {
+			step["outcome"] = outcome
+		}
+
+		ctx.Path = append(ctx.Path, step)
 
 		// Resolve the next node via edges
 		nextID := graph.resolveEdge(node.ID, outcome)
@@ -366,11 +434,56 @@ func (m *Manager) executeHTTPCallback(session *CallSession, node *IVRNode, ctx *
 	return "http:non2xx"
 }
 
-// executeTransfer routes the call to an agent team. Terminal.
-func (m *Manager) executeTransfer(session *CallSession, node *IVRNode, ctx *IVRContext) {
+// executeTransfer routes the call to an agent team. If the transfer node has
+// outgoing edges in the graph it blocks until the transfer completes and
+// returns the outcome ("completed", "no_answer", "abandoned") so the IVR loop
+// can continue. When there are no outgoing edges it behaves as before (terminal,
+// returns "").
+func (m *Manager) executeTransfer(session *CallSession, node *IVRNode, ctx *IVRContext, graph *IVRFlowGraph) string {
 	teamID, _ := node.Config["team_id"].(string)
 	m.saveIVRPath(session, ctx.Path)
+
+	// Check if this transfer node has any outgoing edges — if not, terminal.
+	edges := graph.edgeMap[node.ID]
+	if len(edges) == 0 {
+		m.initiateTransfer(session, session.AccountName, teamID, ctx.Path)
+		return "" // terminal
+	}
+
+	// Non-terminal: create TransferDone channel so EndTransfer/timeout/hangup
+	// can signal us instead of tearing down the session.
+	transferDone := make(chan string, 1)
+	session.mu.Lock()
+	session.TransferDone = transferDone
+	session.mu.Unlock()
+
 	m.initiateTransfer(session, session.AccountName, teamID, ctx.Path)
+
+	// Block until the transfer completes (or the channel is closed during cleanup).
+	outcome, ok := <-transferDone
+	if !ok || outcome == "" {
+		outcome = "completed"
+	}
+
+	m.log.Info("Transfer done, resuming IVR", "call_id", session.ID, "outcome", outcome)
+
+	// Create a fresh IVRPlayer for post-transfer audio. EndTransfer saved
+	// the last RTP seq/ts from the bridge so we can continue from there.
+	session.mu.Lock()
+	var postTransferTrack *webrtc.TrackLocalStaticRTP
+	if session.Direction == models.CallDirectionOutgoing {
+		postTransferTrack = session.WAAudioTrack
+	} else {
+		postTransferTrack = session.AudioTrack
+	}
+	player := NewAudioPlayer(postTransferTrack)
+	if session.LastRTPSeq > 0 {
+		player.SetSequence(session.LastRTPSeq, session.LastRTPTimestamp)
+	}
+	session.IVRPlayer = player
+	session.mu.Unlock()
+
+	return outcome
 }
 
 // executeGotoFlow jumps to another IVR flow. Terminal.
@@ -419,18 +532,7 @@ func (m *Manager) executeGotoFlow(session *CallSession, node *IVRNode, ctx *IVRC
 
 // executeTiming branches based on business hours schedule.
 func (m *Manager) executeTiming(session *CallSession, node *IVRNode) string {
-	tz, _ := node.Config["timezone"].(string)
-	if tz == "" {
-		tz = "UTC"
-	}
-
-	loc, err := time.LoadLocation(tz)
-	if err != nil {
-		m.log.Error("Invalid timezone", "error", err, "call_id", session.ID, "timezone", tz)
-		return "out_of_hours"
-	}
-
-	now := time.Now().In(loc)
+	now := time.Now()
 	dayName := strings.ToLower(now.Weekday().String())
 
 	scheduleRaw, _ := node.Config["schedule"].([]interface{})
@@ -490,7 +592,11 @@ func (m *Manager) executeHangup(session *CallSession, node *IVRNode, ctx *IVRCon
 	}
 
 	m.saveIVRPath(session, ctx.Path)
-	m.terminateCall(session, waAccount)
+	if waAccount != nil {
+		m.terminateCall(session, waAccount)
+	} else {
+		m.terminateCallBySession(session)
+	}
 }
 
 // --- Helpers ---
@@ -557,16 +663,6 @@ func (m *Manager) saveIVRPath(session *CallSession, path []map[string]string) {
 	m.db.Model(&models.CallLog{}).
 		Where("id = ?", session.CallLogID).
 		Update("ivr_path", pathJSON)
-}
-
-// terminateCall terminates an active call via the WhatsApp API.
-func (m *Manager) terminateCall(session *CallSession, waAccount *whatsapp.Account) {
-	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
-
-	if err := m.whatsapp.TerminateCall(c, waAccount, session.ID); err != nil {
-		m.log.Error("Failed to terminate call via API", "error", err, "call_id", session.ID)
-	}
 }
 
 // getConfigInt extracts an int from a config map with a default fallback.
