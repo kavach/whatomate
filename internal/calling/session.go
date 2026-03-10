@@ -51,6 +51,9 @@ type CallSession struct {
 	HoldPlayer        *AudioPlayer
 	TransferCancel    context.CancelFunc
 	BridgeStarted     chan struct{} // closed when bridge takes over caller track
+	TransferDone      chan string   // outcome sent when transfer ends; nil = terminal
+	LastRTPSeq        uint16       // last RTP seq from bridge, for post-transfer player
+	LastRTPTimestamp   uint32       // last RTP timestamp from bridge
 
 	// Ringback (outgoing calls)
 	RingbackPlayer *AudioPlayer
@@ -345,14 +348,25 @@ func (m *Manager) getOrgRingback(orgID uuid.UUID) string {
 func (m *Manager) cleanupSession(callID string) {
 	m.mu.Lock()
 	session, exists := m.sessions[callID]
-	if exists {
-		delete(m.sessions, callID)
-	}
-	m.mu.Unlock()
-
 	if !exists {
+		m.mu.Unlock()
 		return
 	}
+
+	// If a transfer is in the "waiting" state the agent's PC is being torn
+	// down intentionally. Don't destroy the whole session — the caller-side
+	// (or WA-side) PeerConnection must stay alive for hold music.
+	session.mu.Lock()
+	if session.TransferStatus == models.CallTransferStatusWaiting {
+		session.mu.Unlock()
+		m.mu.Unlock()
+		m.log.Info("Skipping cleanup — transfer in waiting state", "call_id", callID)
+		return
+	}
+	session.mu.Unlock()
+
+	delete(m.sessions, callID)
+	m.mu.Unlock()
 
 	// Snapshot state and resources under lock, then release before calling external methods
 	session.mu.Lock()
@@ -388,8 +402,15 @@ func (m *Manager) cleanupSession(callID string) {
 	session.DTMFBuffer = nil
 	recorder := session.Recorder
 	session.Recorder = nil
+	transferDone := session.TransferDone
+	session.TransferDone = nil
 
 	session.mu.Unlock()
+
+	// Close TransferDone to unblock any waiting IVR goroutine
+	if transferDone != nil {
+		close(transferDone)
+	}
 
 	// DB operations and broadcasts (outside lock)
 	if transferID != uuid.Nil && transferStatus == models.CallTransferStatusWaiting {
@@ -403,7 +424,7 @@ func (m *Manager) cleanupSession(callID string) {
 		m.db.Model(&models.CallLog{}).
 			Where("id = ?", callLogID).
 			Update("disconnected_by", models.DisconnectedByClient)
-		m.broadcastTransferEvent(orgID, websocket.TypeCallTransferAbandoned, map[string]any{
+		m.broadcastEvent(orgID, websocket.TypeCallTransferAbandoned, map[string]any{
 			"id":           transferID.String(),
 			"completed_at": now.Format(time.RFC3339),
 		})
@@ -457,6 +478,74 @@ func (m *Manager) cleanupSession(callID string) {
 	}
 
 	m.log.Info("Call session cleaned up", "call_id", callID)
+}
+
+// --- Shared helpers to reduce duplication across calling files ---
+
+// broadcastEvent broadcasts a call event via WebSocket to an organization.
+func (m *Manager) broadcastEvent(orgID uuid.UUID, eventType string, payload map[string]any) {
+	if m.wsHub == nil {
+		return
+	}
+	m.wsHub.BroadcastToOrg(orgID, websocket.WSMessage{
+		Type:    eventType,
+		Payload: payload,
+	})
+}
+
+// setupAudioBridge creates a recorder (if enabled), builds an AudioBridge,
+// and assigns both to the session under its lock.
+func (m *Manager) setupAudioBridge(session *CallSession) *AudioBridge {
+	recorder := m.newRecorderIfEnabled()
+	bridge := NewAudioBridge(recorder)
+	session.mu.Lock()
+	session.Bridge = bridge
+	session.Recorder = recorder
+	session.mu.Unlock()
+	return bridge
+}
+
+// safeClose closes a channel only if it hasn't already been closed.
+func safeClose(ch chan struct{}) {
+	select {
+	case <-ch:
+	default:
+		close(ch)
+	}
+}
+
+// terminateCall terminates an active call via the WhatsApp API.
+func (m *Manager) terminateCall(session *CallSession, waAccount *whatsapp.Account) {
+	c, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	if err := m.whatsapp.TerminateCall(c, waAccount, session.ID); err != nil {
+		m.log.Error("Failed to terminate call via API", "error", err, "call_id", session.ID)
+	}
+}
+
+// terminateCallBySession looks up the WhatsApp account from the DB and
+// terminates the call. Used when only the session is available.
+func (m *Manager) terminateCallBySession(session *CallSession) {
+	var account models.WhatsAppAccount
+	if err := m.db.Where("organization_id = ? AND name = ?", session.OrganizationID, session.AccountName).
+		First(&account).Error; err != nil {
+		m.log.Error("Failed to look up account for call termination", "error", err, "call_id", session.ID)
+		return
+	}
+	waAccount := account.ToWAAccount()
+	if waAccount.AccessToken != "" {
+		m.terminateCall(session, waAccount)
+	}
+}
+
+// durationSince calculates seconds elapsed since a given time, returning 0 if
+// the pointer is nil.
+func durationSince(from *time.Time, now time.Time) int {
+	if from == nil {
+		return 0
+	}
+	return int(now.Sub(*from).Seconds())
 }
 
 // newRecorderIfEnabled creates a CallRecorder if recording is enabled, or returns nil.

@@ -37,6 +37,7 @@ const flowId = computed(() => route.params.id as string)
 const flowName = ref('')
 const isActive = ref(true)
 const isCallStart = ref(false)
+const isOutgoingEnd = ref(false)
 const saving = ref(false)
 const loading = ref(true)
 
@@ -67,7 +68,7 @@ const palette: { type: IVRNodeType; label: string; icon: any; color: string }[] 
 // Vue Flow instance
 const { nodes, edges, addNodes, addEdges, removeNodes, removeEdges, onConnect, project, fitView } = useVueFlow({
   defaultEdgeOptions: {
-    type: 'smoothstep',
+    type: 'default',
     animated: true,
     markerEnd: MarkerType.ArrowClosed,
   },
@@ -107,7 +108,7 @@ function addNodeFromPalette(type: IVRNodeType) {
     http_callback: { url: '', method: 'GET', headers: {}, body_template: '', timeout_seconds: 10 },
     transfer: { team_id: '' },
     goto_flow: { flow_id: '' },
-    timing: { timezone: 'UTC', schedule: [
+    timing: { schedule: [
       { day: 'monday', enabled: true, start_time: '09:00', end_time: '17:00' },
       { day: 'tuesday', enabled: true, start_time: '09:00', end_time: '17:00' },
       { day: 'wednesday', enabled: true, start_time: '09:00', end_time: '17:00' },
@@ -143,12 +144,31 @@ onConnect((params) => {
 
   addEdges([{
     ...params,
-    type: 'smoothstep',
+    type: 'default',
     animated: true,
     markerEnd: MarkerType.ArrowClosed,
     label: params.sourceHandle || 'default',
   }])
+  spreadParallelLabels()
 })
+
+// Spread labels vertically when multiple edges share the same source→target.
+function spreadParallelLabels() {
+  const groups = new Map<string, Edge[]>()
+  for (const e of edges.value) {
+    const key = `${e.source}→${e.target}`
+    if (!groups.has(key)) groups.set(key, [])
+    groups.get(key)!.push(e)
+  }
+  for (const group of groups.values()) {
+    for (let i = 0; i < group.length; i++) {
+      const yOffset = group.length > 1 ? (i - (group.length - 1) / 2) * 22 : 0
+      group[i].labelStyle = { transform: `translateY(${yOffset}px)` }
+      group[i].labelBgStyle = { fill: 'none', fillOpacity: 0 }
+      group[i].labelBgPadding = [0, 0] as [number, number]
+    }
+  }
+}
 
 // Select edge on click (Backspace/Delete will remove it)
 function onEdgeClick({ edge }: EdgeMouseEvent) {
@@ -165,11 +185,12 @@ function onEdgeUpdate({ edge, connection }: { edge: Edge; connection: Connection
   removeEdges([edge])
   addEdges([{
     ...connection,
-    type: 'smoothstep',
+    type: 'default',
     animated: true,
     markerEnd: MarkerType.ArrowClosed,
     label: connection.sourceHandle || 'default',
   }])
+  spreadParallelLabels()
 }
 
 // Update node data from properties panel
@@ -255,7 +276,7 @@ function loadFlowData(data: IVRFlowData) {
     source: e.from,
     target: e.to,
     sourceHandle: e.condition,
-    type: 'smoothstep' as const,
+    type: 'default' as const,
     animated: true,
     markerEnd: MarkerType.ArrowClosed,
     label: e.condition !== 'default' ? e.condition : '',
@@ -263,6 +284,7 @@ function loadFlowData(data: IVRFlowData) {
 
   addNodes(vfNodes)
   addEdges(vfEdges)
+  spreadParallelLabels()
 
   setTimeout(() => fitView({ padding: 0.2 }), 100)
 }
@@ -285,6 +307,7 @@ async function saveFlow() {
       name: flowName.value,
       is_active: isActive.value,
       is_call_start: isCallStart.value,
+      is_outgoing_end: isOutgoingEnd.value,
       menu: flowData,
     })
 
@@ -332,6 +355,7 @@ onMounted(async () => {
     flowName.value = flow.name
     isActive.value = flow.is_active
     isCallStart.value = flow.is_call_start
+    isOutgoingEnd.value = flow.is_outgoing_end
 
     if (flow.menu && flow.menu.version === 2) {
       loadFlowData(flow.menu)
@@ -358,7 +382,11 @@ onMounted(async () => {
       </div>
       <div class="flex items-center gap-2 ml-2">
         <Switch v-model:checked="isCallStart" :disabled="!isActive" />
-        <Label class="text-xs whitespace-nowrap">Call Start</Label>
+        <Label class="text-xs whitespace-nowrap">Incoming Call Start</Label>
+      </div>
+      <div class="flex items-center gap-2 ml-2">
+        <Switch v-model:checked="isOutgoingEnd" :disabled="!isActive" />
+        <Label class="text-xs whitespace-nowrap">Outgoing Post-Call</Label>
       </div>
       <div class="flex-1" />
       <Button :disabled="saving" size="sm" @click="saveFlow">
@@ -424,3 +452,4 @@ onMounted(async () => {
     </div>
   </div>
 </template>
+
