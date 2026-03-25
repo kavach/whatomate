@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/utils"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -44,6 +45,17 @@ func (a *App) ListCallTransfers(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to fetch call transfers", nil, "")
 	}
 
+	// Mask phone numbers if enabled for this organization
+	if a.ShouldMaskPhoneNumbers(orgID) {
+		for i := range transfers {
+			transfers[i].CallerPhone = utils.MaskPhoneNumber(transfers[i].CallerPhone)
+			if transfers[i].Contact != nil {
+				transfers[i].Contact.PhoneNumber = utils.MaskPhoneNumber(transfers[i].Contact.PhoneNumber)
+				transfers[i].Contact.ProfileName = utils.MaskIfPhoneNumber(transfers[i].Contact.ProfileName)
+			}
+		}
+	}
+
 	return r.SendEnvelope(map[string]any{
 		"call_transfers": transfers,
 		"total":          total,
@@ -78,6 +90,14 @@ func (a *App) GetCallTransfer(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Call transfer not found", nil, "")
 	}
 
+	if a.ShouldMaskPhoneNumbers(orgID) {
+		transfer.CallerPhone = utils.MaskPhoneNumber(transfer.CallerPhone)
+		if transfer.Contact != nil {
+			transfer.Contact.PhoneNumber = utils.MaskPhoneNumber(transfer.Contact.PhoneNumber)
+			transfer.Contact.ProfileName = utils.MaskIfPhoneNumber(transfer.Contact.ProfileName)
+		}
+	}
+
 	return r.SendEnvelope(transfer)
 }
 
@@ -107,12 +127,16 @@ func (a *App) ConnectCallTransfer(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusConflict, "Transfer is no longer waiting", nil, "")
 	}
 
-	// Atomically claim the transfer in the DB so concurrent accepts are rejected
-	res := a.DB.Model(&models.CallTransfer{}).
-		Where("id = ? AND status = ?", transferID, models.CallTransferStatusWaiting).
-		Update("status", models.CallTransferStatusConnected)
-	if res.RowsAffected == 0 {
-		return r.SendErrorEnvelope(fasthttp.StatusConflict, "Transfer was already accepted by another agent", nil, "")
+	// Check eligibility BEFORE atomically claiming the transfer.
+	// This avoids claiming and then reverting, which creates a window where
+	// the transfer is stuck as "connected" with no agent.
+
+	// If transfer is directed to a specific agent (no team), reject other agents.
+	// For team transfers with rotation, any team member can accept — the atomic
+	// UPDATE below is the sole concurrency guard.
+	if transfer.AgentID != nil && *transfer.AgentID != userID && transfer.TeamID == nil {
+		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
+			"This transfer is directed to a specific agent", nil, "")
 	}
 
 	// If transfer has a team_id, check agent is a member (unless super admin)
@@ -126,14 +150,12 @@ func (a *App) ConnectCallTransfer(r *fastglue.Request) error {
 		}
 	}
 
-	// If transfer is directed to a specific agent, reject other agents
-	if transfer.AgentID != nil && *transfer.AgentID != userID {
-		// Revert the atomic claim
-		a.DB.Model(&models.CallTransfer{}).
-			Where("id = ?", transferID).
-			Update("status", models.CallTransferStatusWaiting)
-		return r.SendErrorEnvelope(fasthttp.StatusForbidden,
-			"This transfer is directed to a specific agent", nil, "")
+	// Atomically claim the transfer — concurrent accepts are rejected
+	res := a.DB.Model(&models.CallTransfer{}).
+		Where("id = ? AND status = ?", transferID, models.CallTransferStatusWaiting).
+		Update("status", models.CallTransferStatusConnected)
+	if res.RowsAffected == 0 {
+		return r.SendErrorEnvelope(fasthttp.StatusConflict, "Transfer was already accepted by another agent", nil, "")
 	}
 
 	// Parse SDP offer from body
