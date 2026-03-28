@@ -24,7 +24,7 @@ jobs:
         with:
           host: ${{ secrets.ORACLE_HOST }}
           username: ${{ secrets.ORACLE_USER }}
-          key: ${{ secrets.E2E_ORACLE_KEY }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
           source: whatomate
           target: /opt/whatomate/bin/
 
