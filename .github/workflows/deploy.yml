@@ -1,4 +1,4 @@
-name: Deploy Whatomate to E2E VM
+name: Deploy Whatomate to Oracle Cloud VM
 
 on:
   workflow_dispatch:
@@ -12,7 +12,7 @@ jobs:
         uses: dawidd6/action-download-artifact@v3
         with:
           workflow: build.yml
-          name: whatomate-linux-amd64
+          name: whatomate-linux-arm64
           branch: release
           path: .
 
@@ -22,9 +22,9 @@ jobs:
       - name: Upload binary to VM
         uses: appleboy/scp-action@v0.1.7
         with:
-          host: ${{ secrets.E2E_HOST }}
-          username: ${{ secrets.E2E_USER }}
-          key: ${{ secrets.E2E_SSH_KEY }}
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.E2E_ORACLE_KEY }}
           source: whatomate
           target: /opt/whatomate/bin/
 
@@ -50,9 +50,9 @@ jobs:
       - name: Blue-Green switch
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.E2E_HOST }}
-          username: ${{ secrets.E2E_USER }}
-          key: ${{ secrets.E2E_SSH_KEY }}
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
           script: |
             set -e
             CADDYFILE=/etc/caddy/Caddyfile
@@ -79,8 +79,6 @@ jobs:
 
             sudo sed -i "s/127.0.0.1:$OLD_PORT/127.0.0.1:$NEW_PORT/" $CADDYFILE
             sudo caddy reload --config $CADDYFILE
-
-            sudo caddy reload --config /etc/caddy/Caddyfile
 
             echo "$NEW" | sudo tee /opt/whatomate/active_color
 
