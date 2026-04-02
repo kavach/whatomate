@@ -294,6 +294,7 @@ export const flowsService = {
 export const campaignsService = {
   list: (params?: { status?: string; from?: string; to?: string; search?: string; page?: number; limit?: number }) =>
     api.get('/campaigns', { params }),
+  get: (id: string) => api.get(`/campaigns/${id}`),
   create: (data: any) => api.post('/campaigns', data),
   update: (id: string, data: any) => api.put(`/campaigns/${id}`, data),
   delete: (id: string) => api.delete(`/campaigns/${id}`),
@@ -327,6 +328,7 @@ export const chatbotService = {
   // Keywords
   listKeywords: (params?: { search?: string; page?: number; limit?: number }) =>
     api.get<{ rules: any[]; total?: number }>('/chatbot/keywords', { params }),
+  getKeyword: (id: string) => api.get(`/chatbot/keywords/${id}`),
   createKeyword: (data: any) => api.post('/chatbot/keywords', data),
   updateKeyword: (id: string, data: any) => api.put(`/chatbot/keywords/${id}`, data),
   deleteKeyword: (id: string) => api.delete(`/chatbot/keywords/${id}`),
@@ -342,6 +344,7 @@ export const chatbotService = {
   // AI Contexts
   listAIContexts: (params?: { search?: string; page?: number; limit?: number }) =>
     api.get<{ contexts: any[]; total?: number }>('/chatbot/ai-contexts', { params }),
+  getAIContext: (id: string) => api.get(`/chatbot/ai-contexts/${id}`),
   createAIContext: (data: any) => api.post('/chatbot/ai-contexts', data),
   updateAIContext: (id: string, data: any) => api.put(`/chatbot/ai-contexts/${id}`, data),
   deleteAIContext: (id: string) => api.delete(`/chatbot/ai-contexts/${id}`),
@@ -693,6 +696,11 @@ export interface Team {
   per_agent_timeout_secs: number
   is_active: boolean
   member_count: number
+  members?: TeamMember[]
+  created_by_id?: string
+  created_by_name?: string
+  updated_by_id?: string
+  updated_by_name?: string
   created_at: string
   updated_at: string
 }
@@ -740,6 +748,33 @@ export const teamsService = {
     api.post<{ member: TeamMember }>(`/teams/${teamId}/members`, data),
   removeMember: (teamId: string, userId: string) =>
     api.delete(`/teams/${teamId}/members/${userId}`)
+}
+
+// Audit Logs
+export interface AuditLogChange {
+  field: string
+  old_value: any
+  new_value: any
+}
+
+export interface AuditLogEntry {
+  id: string
+  resource_type: string
+  resource_id: string
+  user_name: string
+  action: 'created' | 'updated' | 'deleted'
+  changes: AuditLogChange[]
+  created_at: string
+}
+
+export const auditLogsService = {
+  list: (params: {
+    resource_type: string
+    resource_id: string
+    page?: number
+    limit?: number
+  }) =>
+    api.get<{ audit_logs: AuditLogEntry[]; total: number }>('/audit-logs', { params }),
 }
 
 export const webhooksService = {
