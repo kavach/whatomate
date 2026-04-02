@@ -87,7 +87,7 @@ function handlePageChange(page: number) {
 
 // Filter state
 const filterStatus = ref<string>('all')
-type TimeRangePreset = 'today' | '7days' | '30days' | 'this_month' | 'custom'
+type TimeRangePreset = 'all' | 'today' | '7days' | '30days' | 'this_month' | 'custom'
 const selectedRange = ref<TimeRangePreset>('this_month')
 const customDateRange = ref<any>({ start: undefined, end: undefined })
 const isDatePickerOpen = ref(false)
@@ -201,12 +201,14 @@ async function fetchCampaigns() {
   isLoading.value = true
   error.value = null
   try {
-    const { from, to } = getDateRange.value
     const params: Record<string, string | number> = {
-      from,
-      to,
       page: currentPage.value,
       limit: pageSize
+    }
+    if (selectedRange.value !== 'all') {
+      const { from, to } = getDateRange.value
+      params.from = from
+      params.to = to
     }
     if (filterStatus.value && filterStatus.value !== 'all') {
       params.status = filterStatus.value
@@ -362,6 +364,7 @@ function getProgressPercentage(campaign: Campaign): number {
                       <SelectValue :placeholder="$t('campaigns.selectRange')" />
                     </SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="all">{{ $t('campaigns.allTime') }}</SelectItem>
                       <SelectItem value="today">{{ $t('campaigns.today') }}</SelectItem>
                       <SelectItem value="7days">{{ $t('campaigns.last7Days') }}</SelectItem>
                       <SelectItem value="30days">{{ $t('campaigns.last30Days') }}</SelectItem>
