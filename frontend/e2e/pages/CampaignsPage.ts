@@ -14,7 +14,7 @@ export class CampaignsPage extends BasePage {
     this.heading = page.getByRole('heading', { name: /Campaigns/i }).first()
     this.createButton = page.getByRole('button', { name: /Create Campaign/i }).first()
     this.statusFilter = page.locator('button[role="combobox"]').first()
-    this.timeRangeFilter = page.locator('button[role="combobox"]').filter({ hasText: /This month|Today|days/i }).first()
+    this.timeRangeFilter = page.locator('button[role="combobox"]').filter({ hasText: /This month|Today|days|All time|Todo el tiempo/i }).first()
     this.createDialog = page.locator('[role="dialog"][data-state="open"]')
     this.alertDialog = page.locator('[role="alertdialog"]')
   }

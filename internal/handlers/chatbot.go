@@ -2,9 +2,12 @@ package handlers
 
 import (
 	"encoding/json"
+	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
+	"github.com/shridarpatil/whatomate/internal/audit"
 	"github.com/shridarpatil/whatomate/internal/models"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -62,15 +65,18 @@ type ChatbotStatsResponse struct {
 
 // KeywordRuleResponse represents a keyword rule for API response
 type KeywordRuleResponse struct {
-	ID              string             `json:"id"`
-	Name            string             `json:"name"`
-	Keywords        []string           `json:"keywords"`
-	MatchType       models.MatchType   `json:"match_type"`
+	ID              string              `json:"id"`
+	Name            string              `json:"name"`
+	Keywords        []string            `json:"keywords"`
+	MatchType       models.MatchType    `json:"match_type"`
 	ResponseType    models.ResponseType `json:"response_type"`
-	ResponseContent json.RawMessage    `json:"response_content"`
-	Priority        int                `json:"priority"`
-	Enabled         bool               `json:"enabled"`
-	CreatedAt       string             `json:"created_at"`
+	ResponseContent json.RawMessage     `json:"response_content"`
+	Priority        int                 `json:"priority"`
+	Enabled         bool                `json:"enabled"`
+	CreatedByName   string              `json:"created_by_name,omitempty"`
+	UpdatedByName   string              `json:"updated_by_name,omitempty"`
+	CreatedAt       string              `json:"created_at"`
+	UpdatedAt       string              `json:"updated_at"`
 }
 
 // ChatbotFlowResponse represents a chatbot flow for API response
@@ -86,14 +92,18 @@ type ChatbotFlowResponse struct {
 
 // AIContextResponse represents an AI context for API response
 type AIContextResponse struct {
-	ID              string            `json:"id"`
-	Name            string            `json:"name"`
+	ID              string             `json:"id"`
+	Name            string             `json:"name"`
 	ContextType     models.ContextType `json:"context_type"`
-	TriggerKeywords []string          `json:"trigger_keywords"`
-	StaticContent   string            `json:"static_content"`
-	Enabled         bool              `json:"enabled"`
-	Priority        int               `json:"priority"`
-	CreatedAt       string            `json:"created_at"`
+	TriggerKeywords []string           `json:"trigger_keywords"`
+	StaticContent   string             `json:"static_content"`
+	ApiConfig       models.JSONB       `json:"api_config,omitempty"`
+	Enabled         bool               `json:"enabled"`
+	Priority        int                `json:"priority"`
+	CreatedByName   string             `json:"created_by_name,omitempty"`
+	UpdatedByName   string             `json:"updated_by_name,omitempty"`
+	CreatedAt       string             `json:"created_at"`
+	UpdatedAt       string             `json:"updated_at"`
 }
 
 // GetChatbotSettings returns chatbot settings and stats
@@ -433,7 +443,7 @@ func (a *App) ListKeywordRules(r *fastglue.Request) error {
 	query.Count(&total)
 
 	var rules []models.KeywordRule
-	if err := pg.Apply(query.Order("priority DESC, created_at DESC")).
+	if err := pg.Apply(query.Preload("CreatedBy").Preload("UpdatedBy").Order("priority DESC, created_at DESC")).
 		Find(&rules).Error; err != nil {
 		a.Log.Error("Failed to fetch keyword rules", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to fetch keyword rules", nil, "")
@@ -442,7 +452,7 @@ func (a *App) ListKeywordRules(r *fastglue.Request) error {
 	response := make([]KeywordRuleResponse, len(rules))
 	for i, rule := range rules {
 		responseContent, _ := json.Marshal(rule.ResponseContent)
-		response[i] = KeywordRuleResponse{
+		resp := KeywordRuleResponse{
 			ID:              rule.ID.String(),
 			Name:            rule.Name,
 			Keywords:        rule.Keywords,
@@ -452,7 +462,15 @@ func (a *App) ListKeywordRules(r *fastglue.Request) error {
 			Priority:        rule.Priority,
 			Enabled:         rule.IsEnabled,
 			CreatedAt:       rule.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:       rule.UpdatedAt.Format(time.RFC3339),
 		}
+		if rule.CreatedBy != nil {
+			resp.CreatedByName = rule.CreatedBy.FullName
+		}
+		if rule.UpdatedBy != nil {
+			resp.UpdatedByName = rule.UpdatedBy.FullName
+		}
+		response[i] = resp
 	}
 
 	return r.SendEnvelope(map[string]any{
@@ -465,7 +483,7 @@ func (a *App) ListKeywordRules(r *fastglue.Request) error {
 
 // CreateKeywordRule creates a new keyword rule
 func (a *App) CreateKeywordRule(r *fastglue.Request) error {
-	orgID, err := a.getOrgID(r)
+	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
@@ -509,6 +527,8 @@ func (a *App) CreateKeywordRule(r *fastglue.Request) error {
 		ResponseContent: models.JSONB(req.ResponseContent),
 		Priority:        req.Priority,
 		IsEnabled:       req.Enabled,
+		CreatedByID:     &userID,
+		UpdatedByID:     &userID,
 	}
 
 	if err := a.DB.Create(&rule).Error; err != nil {
@@ -518,6 +538,8 @@ func (a *App) CreateKeywordRule(r *fastglue.Request) error {
 
 	// Invalidate cache
 	a.InvalidateKeywordRulesCache(orgID)
+
+	audit.LogAudit(a.DB, orgID, userID, audit.GetUserName(a.DB, userID), "keyword_rule", rule.ID, models.AuditActionCreated, nil, &rule)
 
 	return r.SendEnvelope(map[string]interface{}{
 		"id":      rule.ID.String(),
@@ -537,9 +559,11 @@ func (a *App) GetKeywordRule(r *fastglue.Request) error {
 		return nil
 	}
 
-	rule, err := findByIDAndOrg[models.KeywordRule](a.DB, r, id, orgID, "Keyword rule")
-	if err != nil {
-		return nil
+	var rule models.KeywordRule
+	if err := a.DB.Where("id = ? AND organization_id = ?", id, orgID).
+		Preload("CreatedBy").Preload("UpdatedBy").
+		First(&rule).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Keyword rule not found", nil, "")
 	}
 
 	responseContent, _ := json.Marshal(rule.ResponseContent)
@@ -553,6 +577,13 @@ func (a *App) GetKeywordRule(r *fastglue.Request) error {
 		Priority:        rule.Priority,
 		Enabled:         rule.IsEnabled,
 		CreatedAt:       rule.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:       rule.UpdatedAt.Format(time.RFC3339),
+	}
+	if rule.CreatedBy != nil {
+		response.CreatedByName = rule.CreatedBy.FullName
+	}
+	if rule.UpdatedBy != nil {
+		response.UpdatedByName = rule.UpdatedBy.FullName
 	}
 
 	return r.SendEnvelope(response)
@@ -560,7 +591,7 @@ func (a *App) GetKeywordRule(r *fastglue.Request) error {
 
 // UpdateKeywordRule updates a keyword rule
 func (a *App) UpdateKeywordRule(r *fastglue.Request) error {
-	orgID, err := a.getOrgID(r)
+	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
@@ -574,6 +605,9 @@ func (a *App) UpdateKeywordRule(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
+
+	// Capture old state for audit
+	oldRule := *rule
 
 	var req struct {
 		Name            *string                 `json:"name"`
@@ -611,6 +645,7 @@ func (a *App) UpdateKeywordRule(r *fastglue.Request) error {
 	if req.Enabled != nil {
 		rule.IsEnabled = *req.Enabled
 	}
+	rule.UpdatedByID = &userID
 
 	if err := a.DB.Save(rule).Error; err != nil {
 		a.Log.Error("Failed to update keyword rule", "error", err)
@@ -620,6 +655,8 @@ func (a *App) UpdateKeywordRule(r *fastglue.Request) error {
 	// Invalidate cache
 	a.InvalidateKeywordRulesCache(orgID)
 
+	audit.LogAudit(a.DB, orgID, userID, audit.GetUserName(a.DB, userID), "keyword_rule", rule.ID, models.AuditActionUpdated, &oldRule, rule)
+
 	return r.SendEnvelope(map[string]interface{}{
 		"message": "Keyword rule updated successfully",
 	})
@@ -627,7 +664,7 @@ func (a *App) UpdateKeywordRule(r *fastglue.Request) error {
 
 // DeleteKeywordRule deletes a keyword rule
 func (a *App) DeleteKeywordRule(r *fastglue.Request) error {
-	orgID, err := a.getOrgID(r)
+	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
@@ -637,17 +674,21 @@ func (a *App) DeleteKeywordRule(r *fastglue.Request) error {
 		return nil
 	}
 
-	result := a.DB.Where("id = ? AND organization_id = ?", id, orgID).Delete(&models.KeywordRule{})
-	if result.Error != nil {
-		a.Log.Error("Failed to delete keyword rule", "error", result.Error)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to delete keyword rule", nil, "")
-	}
-	if result.RowsAffected == 0 {
+	// Load the rule before deleting for audit
+	var rule models.KeywordRule
+	if err := a.DB.Where("id = ? AND organization_id = ?", id, orgID).First(&rule).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Keyword rule not found", nil, "")
+	}
+
+	if err := a.DB.Delete(&rule).Error; err != nil {
+		a.Log.Error("Failed to delete keyword rule", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to delete keyword rule", nil, "")
 	}
 
 	// Invalidate cache
 	a.InvalidateKeywordRulesCache(orgID)
+
+	audit.LogAudit(a.DB, orgID, userID, audit.GetUserName(a.DB, userID), "keyword_rule", id, models.AuditActionDeleted, &rule, nil)
 
 	return r.SendEnvelope(map[string]interface{}{
 		"message": "Keyword rule deleted successfully",
@@ -778,6 +819,8 @@ func (a *App) CreateChatbotFlow(r *fastglue.Request) error {
 		PanelConfig:       models.JSONB(req.PanelConfig),
 		CanvasLayout:      models.JSONB(req.CanvasLayout),
 		IsEnabled:         req.Enabled,
+		CreatedByID:       &userID,
+		UpdatedByID:       &userID,
 	}
 
 	if err := tx.Create(&flow).Error; err != nil {
@@ -833,6 +876,9 @@ func (a *App) CreateChatbotFlow(r *fastglue.Request) error {
 	// Invalidate cache
 	a.InvalidateChatbotFlowsCache(orgID)
 
+	audit.LogAudit(a.DB, orgID, userID, audit.GetUserName(a.DB, userID),
+		"chatbot_flow", flow.ID, models.AuditActionCreated, nil, &flow)
+
 	return r.SendEnvelope(map[string]interface{}{
 		"id":      flow.ID.String(),
 		"message": "Flow created successfully",
@@ -860,6 +906,7 @@ func (a *App) GetChatbotFlow(r *fastglue.Request) error {
 		Preload("Steps", func(db *gorm.DB) *gorm.DB {
 			return db.Order("step_order ASC")
 		}).
+		Preload("CreatedBy").Preload("UpdatedBy").
 		First(&flow).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "Flow not found", nil, "")
 	}
@@ -883,10 +930,12 @@ func (a *App) UpdateChatbotFlow(r *fastglue.Request) error {
 		return nil
 	}
 
-	flow, err := findByIDAndOrg[models.ChatbotFlow](a.DB, r, id, orgID, "Flow")
+	flow, err := findByIDAndOrg[models.ChatbotFlow](a.DB.Preload("Steps"), r, id, orgID, "Flow")
 	if err != nil {
 		return nil
 	}
+
+	oldFlow := *flow // value copy for audit
 
 	var req struct {
 		Name              *string                `json:"name"`
@@ -938,6 +987,7 @@ func (a *App) UpdateChatbotFlow(r *fastglue.Request) error {
 	if req.Enabled != nil {
 		flow.IsEnabled = *req.Enabled
 	}
+	flow.UpdatedByID = &userID
 
 	if err := tx.Save(flow).Error; err != nil {
 		tx.Rollback()
@@ -1002,6 +1052,92 @@ func (a *App) UpdateChatbotFlow(r *fastglue.Request) error {
 	// Invalidate cache
 	a.InvalidateChatbotFlowsCache(orgID)
 
+	// Build extra changes for steps if they were updated
+	var extraChanges []map[string]any
+	if len(req.Steps) > 0 {
+		// Build old step lookup by name
+		oldStepMap := make(map[string]models.ChatbotFlowStep)
+		for _, s := range oldFlow.Steps {
+			oldStepMap[s.StepName] = s
+		}
+
+		// Detect added, removed, and modified steps
+		var added, modified []string
+		newStepNames := make(map[string]bool)
+		for _, s := range req.Steps {
+			newStepNames[s.StepName] = true
+			old, exists := oldStepMap[s.StepName]
+			if !exists {
+				added = append(added, s.StepName)
+			} else {
+				// Check individual fields and log each change
+				if old.Message != s.Message {
+					extraChanges = append(extraChanges, map[string]any{
+						"field": s.StepName + " → message", "old_value": old.Message, "new_value": s.Message,
+					})
+					modified = append(modified, s.StepName)
+				}
+				if string(old.MessageType) != string(s.MessageType) {
+					extraChanges = append(extraChanges, map[string]any{
+						"field": s.StepName + " → type", "old_value": string(old.MessageType), "new_value": string(s.MessageType),
+					})
+					if len(modified) == 0 || modified[len(modified)-1] != s.StepName {
+						modified = append(modified, s.StepName)
+					}
+				}
+				if old.NextStep != s.NextStep {
+					extraChanges = append(extraChanges, map[string]any{
+						"field": s.StepName + " → next_step", "old_value": old.NextStep, "new_value": s.NextStep,
+					})
+					if len(modified) == 0 || modified[len(modified)-1] != s.StepName {
+						modified = append(modified, s.StepName)
+					}
+				}
+				if string(old.InputType) != string(s.InputType) {
+					extraChanges = append(extraChanges, map[string]any{
+						"field": s.StepName + " → input_type", "old_value": string(old.InputType), "new_value": s.InputType,
+					})
+					if len(modified) == 0 || modified[len(modified)-1] != s.StepName {
+						modified = append(modified, s.StepName)
+					}
+				}
+				if old.StoreAs != s.StoreAs {
+					extraChanges = append(extraChanges, map[string]any{
+						"field": s.StepName + " → store_as", "old_value": old.StoreAs, "new_value": s.StoreAs,
+					})
+					if len(modified) == 0 || modified[len(modified)-1] != s.StepName {
+						modified = append(modified, s.StepName)
+					}
+				}
+			}
+		}
+		var removed []string
+		for _, s := range oldFlow.Steps {
+			if !newStepNames[s.StepName] {
+				removed = append(removed, s.StepName)
+			}
+		}
+
+		if len(added) > 0 {
+			extraChanges = append(extraChanges, map[string]any{
+				"field": "steps_added", "old_value": nil, "new_value": strings.Join(added, ", "),
+			})
+		}
+		if len(removed) > 0 {
+			extraChanges = append(extraChanges, map[string]any{
+				"field": "steps_removed", "old_value": strings.Join(removed, ", "), "new_value": nil,
+			})
+		}
+		if len(oldFlow.Steps) != len(req.Steps) {
+			extraChanges = append(extraChanges, map[string]any{
+				"field": "step_count", "old_value": fmt.Sprintf("%d", len(oldFlow.Steps)), "new_value": fmt.Sprintf("%d", len(req.Steps)),
+			})
+		}
+	}
+
+	audit.LogAudit(a.DB, orgID, userID, audit.GetUserName(a.DB, userID),
+		"chatbot_flow", flow.ID, models.AuditActionUpdated, &oldFlow, flow, extraChanges...)
+
 	return r.SendEnvelope(map[string]interface{}{
 		"message": "Flow updated successfully",
 	})
@@ -1022,6 +1158,10 @@ func (a *App) DeleteChatbotFlow(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
+
+	// Load flow for audit before deleting
+	var flowForAudit models.ChatbotFlow
+	a.DB.Where("id = ? AND organization_id = ?", id, orgID).First(&flowForAudit)
 
 	// Delete flow and steps in transaction
 	tx := a.DB.Begin()
@@ -1050,6 +1190,9 @@ func (a *App) DeleteChatbotFlow(r *fastglue.Request) error {
 	// Invalidate cache
 	a.InvalidateChatbotFlowsCache(orgID)
 
+	audit.LogAudit(a.DB, orgID, userID, audit.GetUserName(a.DB, userID),
+		"chatbot_flow", id, models.AuditActionDeleted, &flowForAudit, nil)
+
 	return r.SendEnvelope(map[string]interface{}{
 		"message": "Flow deleted successfully",
 	})
@@ -1077,7 +1220,7 @@ func (a *App) ListAIContexts(r *fastglue.Request) error {
 	query.Count(&total)
 
 	var contexts []models.AIContext
-	if err := pg.Apply(query.Order("priority DESC, created_at DESC")).
+	if err := pg.Apply(query.Preload("CreatedBy").Preload("UpdatedBy").Order("priority DESC, created_at DESC")).
 		Find(&contexts).Error; err != nil {
 		a.Log.Error("Failed to fetch AI contexts", "error", err)
 		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to fetch AI contexts", nil, "")
@@ -1085,16 +1228,25 @@ func (a *App) ListAIContexts(r *fastglue.Request) error {
 
 	response := make([]AIContextResponse, len(contexts))
 	for i, ctx := range contexts {
-		response[i] = AIContextResponse{
+		resp := AIContextResponse{
 			ID:              ctx.ID.String(),
 			Name:            ctx.Name,
 			ContextType:     ctx.ContextType,
 			TriggerKeywords: ctx.TriggerKeywords,
 			StaticContent:   ctx.StaticContent,
+			ApiConfig:       ctx.ApiConfig,
 			Enabled:         ctx.IsEnabled,
 			Priority:        ctx.Priority,
 			CreatedAt:       ctx.CreatedAt.Format(time.RFC3339),
+			UpdatedAt:       ctx.UpdatedAt.Format(time.RFC3339),
 		}
+		if ctx.CreatedBy != nil {
+			resp.CreatedByName = ctx.CreatedBy.FullName
+		}
+		if ctx.UpdatedBy != nil {
+			resp.UpdatedByName = ctx.UpdatedBy.FullName
+		}
+		response[i] = resp
 	}
 
 	return r.SendEnvelope(map[string]any{
@@ -1107,7 +1259,7 @@ func (a *App) ListAIContexts(r *fastglue.Request) error {
 
 // CreateAIContext creates a new AI context
 func (a *App) CreateAIContext(r *fastglue.Request) error {
-	orgID, err := a.getOrgID(r)
+	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
@@ -1141,6 +1293,8 @@ func (a *App) CreateAIContext(r *fastglue.Request) error {
 		StaticContent:   req.StaticContent,
 		Priority:        req.Priority,
 		IsEnabled:       req.Enabled,
+		CreatedByID:     &userID,
+		UpdatedByID:     &userID,
 	}
 
 	if err := a.DB.Create(&ctx).Error; err != nil {
@@ -1150,6 +1304,8 @@ func (a *App) CreateAIContext(r *fastglue.Request) error {
 
 	// Invalidate cache
 	a.InvalidateAIContextsCache(orgID)
+
+	audit.LogAudit(a.DB, orgID, userID, audit.GetUserName(a.DB, userID), "ai_context", ctx.ID, models.AuditActionCreated, nil, &ctx)
 
 	return r.SendEnvelope(map[string]interface{}{
 		"id":      ctx.ID.String(),
@@ -1169,17 +1325,38 @@ func (a *App) GetAIContext(r *fastglue.Request) error {
 		return nil
 	}
 
-	aiCtx, err := findByIDAndOrg[models.AIContext](a.DB, r, id, orgID, "AI context")
-	if err != nil {
-		return nil
+	var aiCtx models.AIContext
+	if err := a.DB.Where("id = ? AND organization_id = ?", id, orgID).
+		Preload("CreatedBy").Preload("UpdatedBy").
+		First(&aiCtx).Error; err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "AI context not found", nil, "")
 	}
 
-	return r.SendEnvelope(aiCtx)
+	response := AIContextResponse{
+		ID:              aiCtx.ID.String(),
+		Name:            aiCtx.Name,
+		ContextType:     aiCtx.ContextType,
+		TriggerKeywords: aiCtx.TriggerKeywords,
+		StaticContent:   aiCtx.StaticContent,
+		ApiConfig:       aiCtx.ApiConfig,
+		Enabled:         aiCtx.IsEnabled,
+		Priority:        aiCtx.Priority,
+		CreatedAt:       aiCtx.CreatedAt.Format(time.RFC3339),
+		UpdatedAt:       aiCtx.UpdatedAt.Format(time.RFC3339),
+	}
+	if aiCtx.CreatedBy != nil {
+		response.CreatedByName = aiCtx.CreatedBy.FullName
+	}
+	if aiCtx.UpdatedBy != nil {
+		response.UpdatedByName = aiCtx.UpdatedBy.FullName
+	}
+
+	return r.SendEnvelope(response)
 }
 
 // UpdateAIContext updates an AI context
 func (a *App) UpdateAIContext(r *fastglue.Request) error {
-	orgID, err := a.getOrgID(r)
+	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
@@ -1193,6 +1370,9 @@ func (a *App) UpdateAIContext(r *fastglue.Request) error {
 	if err != nil {
 		return nil
 	}
+
+	// Capture old state for audit
+	oldCtx := *aiCtx
 
 	var req struct {
 		Name            *string             `json:"name"`
@@ -1225,6 +1405,7 @@ func (a *App) UpdateAIContext(r *fastglue.Request) error {
 	if req.Enabled != nil {
 		aiCtx.IsEnabled = *req.Enabled
 	}
+	aiCtx.UpdatedByID = &userID
 
 	if err := a.DB.Save(aiCtx).Error; err != nil {
 		a.Log.Error("Failed to update AI context", "error", err)
@@ -1234,6 +1415,8 @@ func (a *App) UpdateAIContext(r *fastglue.Request) error {
 	// Invalidate cache
 	a.InvalidateAIContextsCache(orgID)
 
+	audit.LogAudit(a.DB, orgID, userID, audit.GetUserName(a.DB, userID), "ai_context", aiCtx.ID, models.AuditActionUpdated, &oldCtx, aiCtx)
+
 	return r.SendEnvelope(map[string]interface{}{
 		"message": "AI context updated successfully",
 	})
@@ -1241,7 +1424,7 @@ func (a *App) UpdateAIContext(r *fastglue.Request) error {
 
 // DeleteAIContext deletes an AI context
 func (a *App) DeleteAIContext(r *fastglue.Request) error {
-	orgID, err := a.getOrgID(r)
+	orgID, userID, err := a.getOrgAndUserID(r)
 	if err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusUnauthorized, "Unauthorized", nil, "")
 	}
@@ -1251,17 +1434,21 @@ func (a *App) DeleteAIContext(r *fastglue.Request) error {
 		return nil
 	}
 
-	result := a.DB.Where("id = ? AND organization_id = ?", id, orgID).Delete(&models.AIContext{})
-	if result.Error != nil {
-		a.Log.Error("Failed to delete AI context", "error", result.Error)
-		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to delete AI context", nil, "")
-	}
-	if result.RowsAffected == 0 {
+	// Load the context before deleting for audit
+	var aiCtx models.AIContext
+	if err := a.DB.Where("id = ? AND organization_id = ?", id, orgID).First(&aiCtx).Error; err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusNotFound, "AI context not found", nil, "")
+	}
+
+	if err := a.DB.Delete(&aiCtx).Error; err != nil {
+		a.Log.Error("Failed to delete AI context", "error", err)
+		return r.SendErrorEnvelope(fasthttp.StatusInternalServerError, "Failed to delete AI context", nil, "")
 	}
 
 	// Invalidate cache
 	a.InvalidateAIContextsCache(orgID)
+
+	audit.LogAudit(a.DB, orgID, userID, audit.GetUserName(a.DB, userID), "ai_context", id, models.AuditActionDeleted, &aiCtx, nil)
 
 	return r.SendEnvelope(map[string]interface{}{
 		"message": "AI context deleted successfully",
