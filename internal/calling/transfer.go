@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"maps"
 	"strconv"
 	"time"
 
@@ -708,11 +709,7 @@ func (m *Manager) runTransferRotation(session *CallSession, transfer models.Call
 		basePayload["initiating_agent_id"] = transfer.InitiatingAgentID.String()
 	}
 
-	for {
-		// Check if total timeout exceeded or transfer already claimed
-		if totalCtx.Err() != nil {
-			break
-		}
+	for totalCtx.Err() == nil {
 		session.mu.Lock()
 		status := session.TransferStatus
 		session.mu.Unlock()
@@ -750,9 +747,7 @@ func (m *Manager) runTransferRotation(session *CallSession, transfer models.Call
 
 		// Notify this specific agent
 		agentPayload := make(map[string]any)
-		for k, v := range basePayload {
-			agentPayload[k] = v
-		}
+		maps.Copy(agentPayload, basePayload)
 		agentPayload["assigned_to_you"] = true
 		agentPayload["agent_id"] = agentID.String()
 		m.wsHub.BroadcastToUser(orgID, *agentID, websocket.WSMessage{
@@ -835,9 +830,7 @@ func (m *Manager) runTransferRotation(session *CallSession, transfer models.Call
 		Update("agent_id", nil)
 
 	fallbackPayload := make(map[string]any)
-	for k, v := range basePayload {
-		fallbackPayload[k] = v
-	}
+	maps.Copy(fallbackPayload, basePayload)
 	fallbackPayload["broadcast_fallback"] = true
 	m.wsHub.BroadcastToUsers(orgID, remaining, websocket.WSMessage{
 		Type:    websocket.TypeCallTransferWaiting,
@@ -1023,7 +1016,7 @@ func (m *Manager) findSessionByTransferID(transferID uuid.UUID) *CallSession {
 }
 
 // parseTransferCallbacks extracts HTTP callback configs from a transfer IVR node's config map.
-func parseTransferCallbacks(config map[string]interface{}) *TransferCallbacks {
+func parseTransferCallbacks(config map[string]any) *TransferCallbacks {
 	cb := &TransferCallbacks{}
 	cb.OnWaiting = parseOneCallback(config, "on_waiting")
 	cb.OnConnect = parseOneCallback(config, "on_connect")
@@ -1033,8 +1026,8 @@ func parseTransferCallbacks(config map[string]interface{}) *TransferCallbacks {
 	return cb
 }
 
-func parseOneCallback(config map[string]interface{}, key string) *TransferHTTPCallback {
-	raw, ok := config[key].(map[string]interface{})
+func parseOneCallback(config map[string]any, key string) *TransferHTTPCallback {
+	raw, ok := config[key].(map[string]any)
 	if !ok {
 		return nil
 	}
@@ -1046,7 +1039,7 @@ func parseOneCallback(config map[string]interface{}, key string) *TransferHTTPCa
 	bodyTemplate, _ := raw["body_template"].(string)
 
 	headers := make(map[string]string)
-	if hdrs, ok := raw["headers"].(map[string]interface{}); ok {
+	if hdrs, ok := raw["headers"].(map[string]any); ok {
 		for k, v := range hdrs {
 			if s, ok := v.(string); ok {
 				headers[k] = s
@@ -1131,5 +1124,154 @@ func (m *Manager) addAgentVars(vars map[string]string, agentID uuid.UUID) {
 		vars["agent_email"] = user.Email
 		vars["agent_name"] = user.FullName
 	}
+}
+
+// HoldCall puts an active call on hold by stopping the audio bridge and
+// playing hold music to the caller. The agent's WebRTC connection stays alive.
+func (m *Manager) HoldCall(callLogID uuid.UUID) error {
+	session := m.GetSessionByCallLogID(callLogID)
+	if session == nil {
+		return fmt.Errorf("no active session for call log %s", callLogID)
+	}
+
+	orgSettings := m.getOrgCallingSettings(session.OrganizationID)
+
+	session.mu.Lock()
+	if session.HoldPlayer != nil {
+		session.mu.Unlock()
+		return fmt.Errorf("call is already on hold")
+	}
+	if session.Bridge == nil {
+		session.mu.Unlock()
+		return fmt.Errorf("no active audio bridge")
+	}
+
+	// Pick the correct caller track based on call direction
+	var callerLocal *webrtc.TrackLocalStaticRTP
+	var callerRemote *webrtc.TrackRemote
+	if session.Direction == models.CallDirectionOutgoing {
+		callerLocal = session.WAAudioTrack
+		callerRemote = session.WARemoteTrack
+	} else {
+		callerLocal = session.AudioTrack
+		callerRemote = session.CallerRemoteTrack
+	}
+
+	if callerLocal == nil {
+		session.mu.Unlock()
+		return fmt.Errorf("no caller audio track available for hold music")
+	}
+
+	bridge := session.Bridge
+	session.Bridge = nil
+	session.BridgeStarted = make(chan struct{})
+	session.mu.Unlock()
+
+	// Stop bridge and wait for goroutines to finish so lastCallerSeq is final
+	bridge.Stop()
+	bridge.Wait()
+
+	// Create hold music player and advance past the bridge's last seq/ts
+	player := NewAudioPlayer(callerLocal)
+	seq, ts := bridge.LastCallerSeq()
+	if seq > 0 {
+		player.SetSequence(seq, ts)
+	}
+
+	session.mu.Lock()
+	session.HoldPlayer = player
+	session.mu.Unlock()
+
+	// Drain caller's remote track to prevent buffer buildup
+	if callerRemote != nil {
+		go m.consumeAudioTrack(session, callerRemote)
+	}
+
+	// Drain agent's remote track to prevent buffer buildup
+	session.mu.Lock()
+	agentRemote := session.AgentRemoteTrack
+	session.mu.Unlock()
+	if agentRemote != nil {
+		go m.consumeAudioTrack(session, agentRemote)
+	}
+
+	// Start hold music
+	holdFile := orgSettings.HoldMusicFile
+	go func() {
+		packets, err := player.PlayFile(holdFile)
+		if err != nil {
+			m.log.Error("Hold music first play failed", "error", err, "call_id", session.ID, "packets_sent", packets)
+			return
+		}
+		if player.IsStopped() {
+			return
+		}
+		if err := player.PlayFileLoop(holdFile); err != nil {
+			m.log.Error("Hold music playback failed", "error", err, "call_id", session.ID)
+		}
+	}()
+
+	// Broadcast hold event
+	m.broadcastEvent(session.OrganizationID, websocket.TypeCallHold, map[string]any{
+		"call_log_id": callLogID.String(),
+	})
+
+	m.log.Info("Call put on hold", "call_id", session.ID, "call_log_id", callLogID)
+	return nil
+}
+
+// ResumeCall takes a call off hold by stopping hold music and restarting the
+// audio bridge between agent and caller.
+func (m *Manager) ResumeCall(callLogID uuid.UUID) error {
+	session := m.GetSessionByCallLogID(callLogID)
+	if session == nil {
+		return fmt.Errorf("no active session for call log %s", callLogID)
+	}
+
+	session.mu.Lock()
+	if session.HoldPlayer == nil {
+		session.mu.Unlock()
+		return fmt.Errorf("call is not on hold")
+	}
+
+	holdPlayer := session.HoldPlayer
+	session.HoldPlayer = nil
+
+	// Resolve tracks for the bridge
+	var callerRemote *webrtc.TrackRemote
+	var callerLocal *webrtc.TrackLocalStaticRTP
+	if session.Direction == models.CallDirectionOutgoing {
+		callerRemote = session.WARemoteTrack
+		callerLocal = session.WAAudioTrack
+	} else {
+		callerRemote = session.CallerRemoteTrack
+		callerLocal = session.AudioTrack
+	}
+	agentLocal := session.AgentAudioTrack
+	agentRemote := session.AgentRemoteTrack
+	session.mu.Unlock()
+
+	// Stop hold music
+	holdPlayer.Stop()
+
+	// Set up a new bridge (reuses existing recorders)
+	bridge := m.setupAudioBridge(session)
+
+	// Signal BridgeStarted so consumeAudioTrack goroutines exit
+	session.mu.Lock()
+	safeClose(session.BridgeStarted)
+	session.mu.Unlock()
+
+	// Broadcast resume event before bridge blocks
+	m.broadcastEvent(session.OrganizationID, websocket.TypeCallResumed, map[string]any{
+		"call_log_id": callLogID.String(),
+	})
+
+	m.log.Info("Call resumed from hold", "call_id", session.ID, "call_log_id", callLogID)
+
+	// Start bridge (blocks until stopped)
+	go bridge.Start(callerRemote, agentLocal, agentRemote, callerLocal)
+
+	return nil
 }
 
