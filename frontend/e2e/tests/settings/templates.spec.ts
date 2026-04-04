@@ -160,7 +160,14 @@ test.describe('Message Templates - Detail Page', () => {
     const href = await navigateToFirstItem(page)
     if (!href) { test.skip(true, 'No templates exist'); return }
 
-    const input = page.locator('input').first()
+    // Expand the collapsible details card by clicking its header
+    const detailsCard = page.locator('text=Details').first()
+    await detailsCard.click()
+    await page.waitForTimeout(500)
+
+    // Wait for the input to be visible after expanding
+    const input = page.locator('input:visible').first()
+    await input.waitFor({ state: 'visible', timeout: 5000 })
     if (await input.isDisabled()) { test.skip(true, 'No write permission'); return }
 
     const original = await input.inputValue()
@@ -172,8 +179,14 @@ test.describe('Message Templates - Detail Page', () => {
       await saveBtn.click({ force: true })
       await page.waitForTimeout(2000)
 
+      // Re-expand after save (card collapses on reload)
+      await detailsCard.click()
+      await page.waitForTimeout(500)
+
       // Revert
-      await input.fill(original)
+      const inputAfterSave = page.locator('input:visible').first()
+      await inputAfterSave.waitFor({ state: 'visible', timeout: 5000 })
+      await inputAfterSave.fill(original)
       await page.waitForTimeout(300)
       const revertBtn = page.getByRole('button', { name: /Save/i })
       if (await revertBtn.isVisible({ timeout: 3000 }).catch(() => false)) {
