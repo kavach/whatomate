@@ -8,11 +8,16 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
+	"sync"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/audit"
+	"github.com/shridarpatil/whatomate/internal/config"
 	"github.com/shridarpatil/whatomate/internal/crypto"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/internal/utils"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
 )
@@ -72,9 +77,19 @@ func (a *App) ListAccounts(r *fastglue.Request) error {
 
 	// Convert to response format (hide sensitive data)
 	response := make([]AccountResponse, len(accounts))
-	for i, acc := range accounts {
-		response[i] = accountToResponse(acc)
+	for i := range accounts {
+		response[i] = accountToResponse(accounts[i])
 	}
+	var wg sync.WaitGroup
+	for i := range accounts {
+		wg.Add(1)
+		go func(idx int) {
+			defer wg.Done()
+			a.enrichAccountResponseWithMeta(accounts[idx], &response[idx])
+			a.applyAccountPhoneMasking(orgID, &response[idx])
+		}(i)
+	}
+	wg.Wait()
 
 	return r.SendEnvelope(map[string]any{
 		"accounts": response,
@@ -161,7 +176,10 @@ func (a *App) CreateAccount(r *fastglue.Request) error {
 	audit.LogAudit(a.DB, orgID, userID, audit.GetUserName(a.DB, userID),
 		"account", account.ID, models.AuditActionCreated, nil, &account)
 
-	return r.SendEnvelope(accountToResponse(account))
+	resp := accountToResponse(account)
+	a.enrichAccountResponseWithMeta(account, &resp)
+	a.applyAccountPhoneMasking(orgID, &resp)
+	return r.SendEnvelope(resp)
 }
 
 // GetAccount returns a single WhatsApp account
@@ -182,7 +200,10 @@ func (a *App) GetAccount(r *fastglue.Request) error {
 		return nil
 	}
 
-	return r.SendEnvelope(accountToResponse(*account))
+	resp := accountToResponse(*account)
+	a.enrichAccountResponseWithMeta(*account, &resp)
+	a.applyAccountPhoneMasking(orgID, &resp)
+	return r.SendEnvelope(resp)
 }
 
 // UpdateAccount updates a WhatsApp account
@@ -289,7 +310,10 @@ func (a *App) UpdateAccount(r *fastglue.Request) error {
 	audit.LogAudit(a.DB, orgID, userID, audit.GetUserName(a.DB, userID),
 		"account", account.ID, models.AuditActionUpdated, &oldAccount, account, sensitiveChanges...)
 
-	return r.SendEnvelope(accountToResponse(*account))
+	resp := accountToResponse(*account)
+	a.enrichAccountResponseWithMeta(*account, &resp)
+	a.applyAccountPhoneMasking(orgID, &resp)
+	return r.SendEnvelope(resp)
 }
 
 // DeleteAccount deletes a WhatsApp account
@@ -414,6 +438,88 @@ func (a *App) TestAccountConnection(r *fastglue.Request) error {
 }
 
 // Helper functions
+
+func graphAPIBaseURL(cfg *config.Config) string {
+	if cfg == nil {
+		return "https://graph.facebook.com"
+	}
+	base := strings.TrimRight(cfg.WhatsApp.BaseURL, "/")
+	if base == "" {
+		return "https://graph.facebook.com"
+	}
+	return base
+}
+
+func (a *App) fetchWhatsAppDisplayPhone(ctx context.Context, phoneID, accessToken, apiVersion string) (displayPhone, verifiedName string, err error) {
+	phoneID = strings.TrimSpace(phoneID)
+	accessToken = strings.TrimSpace(accessToken)
+	if phoneID == "" || accessToken == "" {
+		return "", "", fmt.Errorf("missing phone id or token")
+	}
+	if apiVersion == "" {
+		apiVersion = "v21.0"
+	}
+	url := fmt.Sprintf("%s/%s/%s?fields=display_phone_number,verified_name",
+		graphAPIBaseURL(a.Config), apiVersion, phoneID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+	if err != nil {
+		return "", "", err
+	}
+	req.Header.Set("Authorization", "Bearer "+accessToken)
+	resp, err := a.HTTPClient.Do(req)
+	if err != nil {
+		return "", "", err
+	}
+	defer func() { _ = resp.Body.Close() }()
+	body, _ := io.ReadAll(resp.Body)
+	if resp.StatusCode != http.StatusOK {
+		return "", "", fmt.Errorf("meta api status %d", resp.StatusCode)
+	}
+	var parsed struct {
+		DisplayPhoneNumber string `json:"display_phone_number"`
+		VerifiedName       string `json:"verified_name"`
+	}
+	if err := json.Unmarshal(body, &parsed); err != nil {
+		return "", "", err
+	}
+	return parsed.DisplayPhoneNumber, parsed.VerifiedName, nil
+}
+
+// enrichAccountResponseWithMeta fills phone_number and display_name from the Graph API (best effort).
+func (a *App) enrichAccountResponseWithMeta(acc models.WhatsAppAccount, resp *AccountResponse) {
+	if a.HTTPClient == nil {
+		return
+	}
+	a.decryptAccountSecrets(&acc)
+	if strings.TrimSpace(acc.AccessToken) == "" {
+		return
+	}
+	apiVer := acc.APIVersion
+	if apiVer == "" {
+		apiVer = "v21.0"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
+	defer cancel()
+	phone, name, err := a.fetchWhatsAppDisplayPhone(ctx, acc.PhoneID, acc.AccessToken, apiVer)
+	if err != nil {
+		a.Log.Debug("Could not load Meta phone details for account", "account", acc.Name, "error", err)
+		return
+	}
+	resp.PhoneNumber = phone
+	resp.DisplayName = name
+}
+
+func (a *App) applyAccountPhoneMasking(orgID uuid.UUID, resp *AccountResponse) {
+	if !a.ShouldMaskPhoneNumbers(orgID) {
+		return
+	}
+	if resp.PhoneNumber != "" {
+		resp.PhoneNumber = utils.MaskPhoneNumber(resp.PhoneNumber)
+	}
+	if resp.DisplayName != "" {
+		resp.DisplayName = utils.MaskIfPhoneNumber(resp.DisplayName)
+	}
+}
 
 func accountToResponse(acc models.WhatsAppAccount) AccountResponse {
 	resp := AccountResponse{

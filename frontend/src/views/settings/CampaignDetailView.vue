@@ -74,6 +74,7 @@ import {
   Upload,
   FileSpreadsheet,
   ChevronDown,
+  Download,
 } from 'lucide-vue-next'
 
 interface Campaign {
@@ -122,7 +123,10 @@ interface Recipient {
   status: string
   sent_at?: string
   delivered_at?: string
+  read_at?: string
   error_message?: string
+  whatsapp_message_id?: string
+  template_params?: Record<string, unknown>
 }
 
 const route = useRoute()
@@ -180,6 +184,14 @@ const canRetryFailed = computed(() => {
   if (!campaign.value || campaign.value.failed_count <= 0) return false
   const s = campaign.value.status
   return s === 'completed' || s === 'paused' || s === 'failed'
+})
+
+/** Recipients CSV export: completed, or send in progress (queued / processing / running / paused). */
+const canExportRecipients = computed(() => {
+  const s = campaign.value?.status
+  if (!s) return false
+  if (s === 'completed') return true
+  return ['queued', 'processing', 'running', 'paused'].includes(s)
 })
 
 // --- Recipients state ---
@@ -532,6 +544,62 @@ async function loadRecipients() {
   } finally {
     isLoadingRecipients.value = false
   }
+}
+
+function escapeCsvField(value: string | undefined | null): string {
+  const s = value ?? ''
+  if (/[",\n\r]/.test(s)) {
+    return `"${s.replace(/"/g, '""')}"`
+  }
+  return s
+}
+
+function isoOrEmpty(iso?: string): string {
+  if (!iso) return ''
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? iso : d.toISOString()
+}
+
+function exportRecipientsCsv() {
+  if (!campaign.value || recipients.value.length === 0 || !canExportRecipients.value) return
+  const headers = [
+    'phone_number',
+    'recipient_name',
+    'status',
+    'sent_at',
+    'delivered_at',
+    'read_at',
+    'error_message',
+    'whatsapp_message_id',
+    'template_params',
+  ]
+  const lines = recipients.value.map((r) =>
+    [
+      escapeCsvField(r.phone_number),
+      escapeCsvField(r.recipient_name),
+      escapeCsvField(r.status),
+      escapeCsvField(isoOrEmpty(r.sent_at)),
+      escapeCsvField(isoOrEmpty(r.delivered_at)),
+      escapeCsvField(isoOrEmpty(r.read_at)),
+      escapeCsvField(r.error_message),
+      escapeCsvField(r.whatsapp_message_id),
+      escapeCsvField(
+        r.template_params && Object.keys(r.template_params).length > 0
+          ? JSON.stringify(r.template_params)
+          : ''
+      ),
+    ].join(',')
+  )
+  const csv = `\uFEFF${headers.join(',')}\r\n${lines.join('\r\n')}`
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' })
+  const url = URL.createObjectURL(blob)
+  const link = document.createElement('a')
+  link.href = url
+  const safe = (campaign.value.name || 'campaign').replace(/[^\w-]+/g, '_').slice(0, 80)
+  link.download = `${safe}_recipients_${new Date().toISOString().split('T')[0]}.csv`
+  link.click()
+  URL.revokeObjectURL(url)
+  toast.success(t('campaigns.exportRecipientsSuccess', 'Recipients list downloaded'))
 }
 
 async function deleteRecipient(recipientId: string) {
@@ -1072,10 +1140,21 @@ onUnmounted(() => {
               {{ $t('campaigns.recipients', 'Recipients') }} ({{ recipients.length }})
             </CardTitle>
           </CollapsibleTrigger>
-          <Button v-if="isDraft" variant="outline" size="sm" @click="openAddRecipientsDialog">
-            <UserPlus class="h-4 w-4 mr-1" />
-            {{ $t('campaigns.addRecipients', 'Add') }}
-          </Button>
+          <div class="flex items-center gap-2 flex-shrink-0">
+            <Button
+              v-if="!isLoadingRecipients && recipients.length > 0 && canExportRecipients"
+              variant="outline"
+              size="sm"
+              @click="exportRecipientsCsv"
+            >
+              <Download class="h-4 w-4 mr-1" />
+              {{ $t('campaigns.exportRecipientsCsv', 'Export CSV') }}
+            </Button>
+            <Button v-if="isDraft" variant="outline" size="sm" @click="openAddRecipientsDialog">
+              <UserPlus class="h-4 w-4 mr-1" />
+              {{ $t('campaigns.addRecipients', 'Add') }}
+            </Button>
+          </div>
         </CardHeader>
         <CollapsibleContent>
         <CardContent>

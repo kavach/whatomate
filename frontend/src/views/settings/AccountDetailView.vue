@@ -73,8 +73,8 @@ interface WhatsAppAccount {
 interface TestResult {
   success: boolean
   error?: string
-  display_phone_number?: string
-  verified_name?: string
+  display_phone_number?: string | number
+  verified_name?: string | number
   quality_rating?: string
   messaging_limit_tier?: string
   code_verification_status?: string
@@ -220,6 +220,16 @@ async function testConnection() {
     testResult.value = response.data.data
     if (testResult.value?.success) {
       toast.success(t('accounts.connectionSuccess', 'Connection successful'))
+      if (account.value) {
+        const p = testResult.value.display_phone_number
+        if (p != null && String(p).trim() !== '') {
+          account.value.phone_number = String(p)
+        }
+        const n = testResult.value.verified_name
+        if (n != null && String(n).trim() !== '') {
+          account.value.display_name = String(n)
+        }
+      }
     } else {
       toast.error(t('accounts.connectionFailed', 'Connection failed') + ': ' + (testResult.value?.error || ''))
     }
@@ -341,6 +351,23 @@ onMounted(async () => {
         <div class="space-y-1.5">
           <Label class="text-xs">{{ $t('accounts.accountName', 'Account Name') }} *</Label>
           <Input v-model="form.name" :disabled="!canWrite" />
+        </div>
+
+        <div
+          v-if="!isNew && account"
+          class="grid grid-cols-1 sm:grid-cols-2 gap-4 rounded-lg border border-border/80 bg-muted/20 p-3"
+        >
+          <div class="space-y-1">
+            <Label class="text-xs text-muted-foreground">{{ $t('accounts.whatsappPhoneNumber', 'WhatsApp number') }}</Label>
+            <p class="text-sm font-mono">{{ account.phone_number || '—' }}</p>
+            <p class="text-[10px] text-muted-foreground leading-snug">
+              {{ $t('accounts.whatsappPhoneNumberHint', 'Loaded from Meta for this phone number ID.') }}
+            </p>
+          </div>
+          <div class="space-y-1">
+            <Label class="text-xs text-muted-foreground">{{ $t('accounts.verifiedDisplayName', 'Verified name (Meta)') }}</Label>
+            <p class="text-sm">{{ account.display_name || '—' }}</p>
+          </div>
         </div>
 
         <Separator />

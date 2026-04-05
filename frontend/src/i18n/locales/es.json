@@ -1487,7 +1487,9 @@
     "addedFromCsv": "Se agregaron {count} destinatarios desde CSV",
     "parseCsvFailed": "Error al analizar el archivo CSV",
     "invalidPhoneNumber": "Número de teléfono inválido",
-    "missingParameters": "Faltan parámetros: necesita {needed}, tiene {has}"
+    "missingParameters": "Faltan parámetros: necesita {needed}, tiene {has}",
+    "exportRecipientsCsv": "Exportar CSV",
+    "exportRecipientsSuccess": "Lista de destinatarios descargada"
   },
   "chatbotSettings": {
     "title": "Configuración del chatbot",
