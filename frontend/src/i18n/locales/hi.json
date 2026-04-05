@@ -1487,7 +1487,9 @@
     "addedFromCsv": "{count} जोड़े",
     "parseCsvFailed": "विफल",
     "invalidPhoneNumber": "अमान्य",
-    "missingParameters": "गायब: {needed}, मिले {has}"
+    "missingParameters": "गायब: {needed}, मिले {has}",
+    "exportRecipientsCsv": "CSV एक्सपोर्ट",
+    "exportRecipientsSuccess": "प्राप्तकर्ता सूची डाउनलोड हो गई"
   },
   "chatbotSettings": {
     "title": "चैटबॉट",

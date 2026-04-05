@@ -1337,7 +1337,10 @@
     "outgoing": "Outgoing",
     "webhookUrl": "Webhook URL",
     "yourAccounts": "Your Accounts",
-    "yourAccountsDesc": "WhatsApp Business accounts connected to your organization."
+    "yourAccountsDesc": "WhatsApp Business accounts connected to your organization.",
+    "whatsappPhoneNumber": "WhatsApp number",
+    "whatsappPhoneNumberHint": "Loaded from Meta for this phone number ID.",
+    "verifiedDisplayName": "Verified name (Meta)"
   },
   "dashboard": {
     "title": "Dashboard",
@@ -1679,7 +1682,9 @@
     "startConfirm": "Are you sure you want to start this campaign?",
     "statistics": "Statistics",
     "template": "Template",
-    "totalRecipients": "Total Recipients"
+    "totalRecipients": "Total Recipients",
+    "exportRecipientsCsv": "Export CSV",
+    "exportRecipientsSuccess": "Recipients list downloaded"
   },
   "chatbotSettings": {
     "title": "Chatbot Settings",

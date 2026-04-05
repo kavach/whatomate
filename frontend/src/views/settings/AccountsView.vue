@@ -31,6 +31,8 @@ interface WhatsAppAccount {
   status: string
   has_access_token: boolean
   has_app_secret: boolean
+  phone_number?: string
+  display_name?: string
   created_at: string
 }
 
@@ -50,6 +52,7 @@ const sortDirection = ref<'asc' | 'desc'>('asc')
 
 const columns = computed<Column<WhatsAppAccount>[]>(() => [
   { key: 'account', label: t('accounts.account', 'Account'), width: 'w-[250px]', sortable: true, sortKey: 'name' },
+  { key: 'phone_number', label: t('accounts.whatsappPhoneNumber', 'WhatsApp number') },
   { key: 'app_id', label: t('accounts.appId', 'App ID') },
   { key: 'phone_id', label: t('accounts.phoneNumberId', 'Phone ID'), sortable: true },
   { key: 'api_version', label: t('accounts.apiVersion', 'Version') },
@@ -160,6 +163,19 @@ async function confirmDelete() {
                     </div>
                     <p class="font-medium truncate">{{ account.name }}</p>
                   </RouterLink>
+                </template>
+                <template #cell-phone_number="{ item: account }">
+                  <div class="min-w-0">
+                    <span v-if="account.phone_number" class="text-sm font-mono">{{ account.phone_number }}</span>
+                    <span v-else class="text-muted-foreground text-sm">—</span>
+                    <p
+                      v-if="account.display_name"
+                      class="text-[11px] text-muted-foreground truncate max-w-[200px]"
+                      :title="account.display_name"
+                    >
+                      {{ account.display_name }}
+                    </p>
+                  </div>
                 </template>
                 <template #cell-app_id="{ item: account }">
                   <code v-if="account.app_id" class="text-xs bg-muted px-1.5 py-0.5 rounded">{{ account.app_id }}</code>

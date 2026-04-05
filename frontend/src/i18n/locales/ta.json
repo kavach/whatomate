@@ -1487,7 +1487,9 @@
     "addedFromCsv": "CSV -இலிருந்து {count} பெறுநர்கள் சேர்க்கப்பட்டனர்",
     "parseCsvFailed": "CSV கோப்பைப் பாகுபடுத்த முடியவில்லை",
     "invalidPhoneNumber": "தவறான தொலைபேசி எண்",
-    "missingParameters": "அளவுருக்கள் காணவில்லை: {needed} தேவை, {has} உள்ளது"
+    "missingParameters": "அளவுருக்கள் காணவில்லை: {needed} தேவை, {has} உள்ளது",
+    "exportRecipientsCsv": "CSV ஏற்றுமதி",
+    "exportRecipientsSuccess": "பெறுநர் பட்டியல் பதிவிறக்கப்பட்டது"
   },
   "chatbotSettings": {
     "title": "அரட்டைப்பேச்சி அமைப்புகள்",
