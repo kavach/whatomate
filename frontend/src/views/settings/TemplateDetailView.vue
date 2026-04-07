@@ -82,6 +82,7 @@ const { t } = useI18n()
 const authStore = useAuthStore()
 
 const bodyHint = 'Use {{1}}, {{2}} for positional or {{name}}, {{email}} for named parameters.'
+const mixedVariablesHint = 'Cannot mix positional ({{1}}, {{2}}) and named ({{name}}) variables. Use one type only.'
 
 const templateId = computed(() => route.params.id as string)
 const isNew = computed(() => templateId.value === 'new')
@@ -131,6 +132,62 @@ const form = ref({
   body_content: '',
   footer_content: '',
   buttons: [] as any[],
+  sample_values: [] as any[],
+})
+
+// Detect variables in body and header content
+const bodyVariables = computed(() => {
+  const matches = form.value.body_content.match(/\{\{([^}]+)\}\}/g) || []
+  return matches.map(m => m.replace(/\{\{|\}\}/g, '').trim())
+})
+
+const headerVariables = computed(() => {
+  if (form.value.header_type !== 'TEXT') return []
+  const matches = form.value.header_content.match(/\{\{([^}]+)\}\}/g) || []
+  return matches.map(m => m.replace(/\{\{|\}\}/g, '').trim())
+})
+
+const allVariables = computed(() => {
+  const vars: { component: string; name: string; label: string; index: number }[] = []
+  const wrap = (v: string) => '\u007B\u007B' + v + '\u007D\u007D'
+  headerVariables.value.forEach((v, i) => vars.push({ component: 'header', name: v, label: wrap(v), index: i + 1 }))
+  bodyVariables.value.forEach((v, i) => vars.push({ component: 'body', name: v, label: wrap(v), index: i + 1 }))
+  return vars
+})
+
+// Detect mixed variable types (positional + named) which are not allowed
+const hasMixedVariables = computed(() => {
+  const vars = allVariables.value
+  if (vars.length === 0) return false
+  const hasPositional = vars.some(v => /^\d+$/.test(v.name))
+  const hasNamed = vars.some(v => !/^\d+$/.test(v.name))
+  return hasPositional && hasNamed
+})
+
+// Build sample_values array from form inputs
+function getSampleValueForVar(component: string, index: number): string {
+  const sv = form.value.sample_values.find(
+    (s: any) => s.component === component && s.index === index
+  )
+  return sv?.value || ''
+}
+
+function setSampleValueForVar(component: string, index: number, value: string) {
+  const existing = form.value.sample_values.findIndex(
+    (s: any) => s.component === component && s.index === index
+  )
+  if (existing >= 0) {
+    form.value.sample_values[existing].value = value
+  } else {
+    form.value.sample_values.push({ component, index, value })
+  }
+}
+
+// Sync sample_values when variables change — remove stale entries
+watch(allVariables, (vars) => {
+  form.value.sample_values = form.value.sample_values.filter((sv: any) =>
+    vars.some(v => v.component === sv.component && v.index === sv.index)
+  )
 })
 
 const buttonTypes = [
@@ -275,6 +332,7 @@ function syncForm() {
       ...b,
       example: Array.isArray(b.example) ? b.example[0] ?? '' : b.example,
     })),
+    sample_values: template.value.sample_values || [],
   }
   // Restore media handle for existing media headers
   headerMediaFile.value = null
@@ -305,6 +363,10 @@ async function save() {
     toast.error(t('templates.bodyRequired', 'Body content is required'))
     return
   }
+  if (hasMixedVariables.value) {
+    toast.error(t('templates.mixedVariables', 'Cannot mix positional ({{1}}, {{2}}) and named ({{name}}) variables. Use one type only.'))
+    return
+  }
   isSaving.value = true
   try {
     const payload = {
@@ -318,6 +380,7 @@ async function save() {
       body_content: form.value.body_content,
       footer_content: form.value.footer_content,
       buttons: form.value.buttons,
+      sample_values: form.value.sample_values,
     }
 
     if (isNew.value) {
@@ -416,7 +479,25 @@ async function confirmPublish() {
   }
 }
 
+// Replace template variables with sample values for preview
+function replaceVariablesWithSamples(text: string, component: string): string {
+  if (!text) return text
+  const samples = form.value.sample_values || []
+  return text.replace(/\{\{([^}]+)\}\}/g, (_match, varName: string) => {
+    const trimmed = varName.trim()
+    const isPositional = /^\d+$/.test(trimmed)
+    const index = isPositional ? parseInt(trimmed) : 0
+    const sv = samples.find((s: any) => {
+      if (s.component !== component) return false
+      if (isPositional) return s.index === index
+      return s.param_name === trimmed || s.index === index
+    })
+    return sv?.value || `[${trimmed}]`
+  })
+}
 
+const previewBody = computed(() => replaceVariablesWithSamples(form.value.body_content, 'body'))
+const previewHeader = computed(() => replaceVariablesWithSamples(form.value.header_content, 'header'))
 
 async function loadFlows() {
   try {
@@ -559,8 +640,8 @@ onMounted(async () => {
           </Select>
         </div>
         <div v-if="form.header_type === 'TEXT'" class="space-y-1.5">
-          <Label class="text-xs">{{ $t('templates.headerContent', 'Header Content') }}</Label>
-          <Input v-model="form.header_content" :disabled="!canWrite || !isEditable" />
+          <Label class="text-xs" for="header-content">{{ $t('templates.headerContent', 'Header Content') }}</Label>
+          <Input id="header-content" v-model="form.header_content" :disabled="!canWrite || !isEditable" />
         </div>
 
         <!-- Header Media Upload for IMAGE/VIDEO/DOCUMENT -->
@@ -613,7 +694,26 @@ onMounted(async () => {
             :rows="6"
             :disabled="!canWrite || !isEditable"
           />
-          <p class="text-xs text-muted-foreground" v-text="bodyHint" />
+          <p v-if="hasMixedVariables" class="text-xs text-destructive" v-text="mixedVariablesHint" />
+          <p v-else class="text-xs text-muted-foreground" v-text="bodyHint" />
+        </div>
+
+        <!-- Sample Values for Variables -->
+        <div v-if="allVariables.length > 0" class="space-y-3">
+          <div>
+            <Label class="text-xs">{{ $t('templates.sampleValues', 'Sample Values for Variables') }}</Label>
+            <p class="text-xs text-muted-foreground mt-0.5">{{ $t('templates.sampleValuesHint', 'Provide example values for your variables. This helps Meta review and approve your template faster.') }}</p>
+          </div>
+          <div v-for="v in allVariables" :key="`${v.component}-${v.index}`" class="flex items-center gap-3">
+            <span class="text-xs text-muted-foreground w-28 shrink-0 font-mono">{{ v.component }}:{{ v.label }}</span>
+            <Input
+              :model-value="getSampleValueForVar(v.component, v.index)"
+              @update:model-value="(val: string) => setSampleValueForVar(v.component, v.index, val)"
+              :placeholder="$t('templates.sampleValuePlaceholder', 'e.g. John Doe')"
+              class="h-8 text-xs"
+              :disabled="!canWrite || !isEditable"
+            />
+          </div>
         </div>
 
         <!-- Buttons -->
@@ -820,13 +920,13 @@ onMounted(async () => {
         <div class="bg-gray-800 light:bg-[#e5ddd5] rounded-lg p-4">
           <div class="bg-gray-700 light:bg-white rounded-lg shadow max-w-[280px] overflow-hidden">
             <div v-if="template.header_type && template.header_type !== 'NONE'" class="p-3 border-b">
-              <div v-if="template.header_type === 'TEXT'" class="font-semibold">{{ template.header_content }}</div>
+              <div v-if="template.header_type === 'TEXT'" class="font-semibold">{{ previewHeader }}</div>
               <div v-else class="h-32 bg-gray-600 light:bg-gray-200 rounded flex items-center justify-center">
                 <span class="text-sm text-gray-400">{{ template.header_type }}</span>
               </div>
             </div>
             <div class="p-3">
-              <p class="text-sm whitespace-pre-wrap">{{ template.body_content }}</p>
+              <p class="text-sm whitespace-pre-wrap">{{ previewBody }}</p>
             </div>
             <div v-if="template.footer_content" class="px-3 pb-3">
               <p class="text-xs text-gray-500">{{ template.footer_content }}</p>
