@@ -57,5 +57,3 @@ audio/
 
 # Test results
 test-results/
-config-blue.toml
-config-green.toml
