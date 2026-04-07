@@ -8,6 +8,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/shridarpatil/whatomate/internal/audit"
 	"github.com/shridarpatil/whatomate/internal/models"
+	"github.com/shridarpatil/whatomate/internal/templateutil"
 	"github.com/shridarpatil/whatomate/pkg/whatsapp"
 	"github.com/valyala/fasthttp"
 	"github.com/zerodha/fastglue"
@@ -120,6 +121,16 @@ func (a *App) CreateTemplate(r *fastglue.Request) error {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "whatsapp_account, name, language, category, and body_content are required", nil, "")
 	}
 
+	// Validate no mixed positional and named parameters
+	if err := templateutil.ValidateNoMixedParams(req.BodyContent); err != nil {
+		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, err.Error(), nil, "")
+	}
+	if req.HeaderType == "TEXT" {
+		if err := templateutil.ValidateNoMixedParams(req.HeaderContent); err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, err.Error(), nil, "")
+		}
+	}
+
 	// Verify account belongs to organization
 	if _, err := a.resolveWhatsAppAccount(orgID, req.WhatsAppAccount); err != nil {
 		return r.SendErrorEnvelope(fasthttp.StatusBadRequest, "WhatsApp account not found", nil, "")
@@ -225,6 +236,18 @@ func (a *App) UpdateTemplate(r *fastglue.Request) error {
 	var req TemplateRequest
 	if err := a.decodeRequest(r, &req); err != nil {
 		return nil
+	}
+
+	// Validate no mixed positional and named parameters
+	if req.BodyContent != "" {
+		if err := templateutil.ValidateNoMixedParams(req.BodyContent); err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, err.Error(), nil, "")
+		}
+	}
+	if req.HeaderType == "TEXT" && req.HeaderContent != "" {
+		if err := templateutil.ValidateNoMixedParams(req.HeaderContent); err != nil {
+			return r.SendErrorEnvelope(fasthttp.StatusBadRequest, err.Error(), nil, "")
+		}
 	}
 
 	// Update fields
