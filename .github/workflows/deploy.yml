@@ -31,9 +31,9 @@ jobs:
       - name: Run database migrations
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ secrets.E2E_HOST }}
-          username: ${{ secrets.E2E_USER }}
-          key: ${{ secrets.E2E_SSH_KEY }}
+          host: ${{ secrets.ORACLE_HOST }}
+          username: ${{ secrets.ORACLE_USER }}
+          key: ${{ secrets.ORACLE_SSH_KEY }}
           script: |
             set -e
             ACTIVE=$(cat /opt/whatomate/active_color)
