@@ -28,24 +28,24 @@ jobs:
           source: whatomate
           target: /opt/whatomate/bin/
 
-      # - name: Run database migrations
-      #   uses: appleboy/ssh-action@v1.0.3
-      #   with:
-      #     host: ${{ secrets.E2E_HOST }}
-      #     username: ${{ secrets.E2E_USER }}
-      #     key: ${{ secrets.E2E_SSH_KEY }}
-      #     script: |
-      #       set -e
-      #       ACTIVE=$(cat /opt/whatomate/active_color)
-      #       echo "Active deployment: $ACTIVE"
-      #       if [ "$ACTIVE" = "blue" ]; then
-      #         NEW=green
-      #       else
-      #         NEW=blue
-      #       fi
-      #       echo "Running database migrations..."
-      #       /opt/whatomate/bin/whatomate server -config /opt/whatomate/config/config-$NEW.toml -migrate
-      #       echo "Migrations completed successfully."
+      - name: Run database migrations
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.E2E_HOST }}
+          username: ${{ secrets.E2E_USER }}
+          key: ${{ secrets.E2E_SSH_KEY }}
+          script: |
+            set -e
+            ACTIVE=$(cat /opt/whatomate/active_color)
+            echo "Active deployment: $ACTIVE"
+            if [ "$ACTIVE" = "blue" ]; then
+              NEW=green
+            else
+              NEW=blue
+            fi
+            echo "Running database migrations..."
+            /opt/whatomate/bin/whatomate server -config /opt/whatomate/config/config-$NEW.toml -migrate
+            echo "Migrations completed successfully."
 
       - name: Blue-Green switch
         uses: appleboy/ssh-action@v1.0.3
