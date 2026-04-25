@@ -48,16 +48,21 @@ jobs:
             # Run it in the background, wait for the migration completion log,
             # then terminate it so this step exits.
             LOG_FILE="/tmp/whatomate-migrate-${NEW}-$(date +%s).log"
-            /opt/whatomate/bin/whatomate server -config "/opt/whatomate/config/config-$NEW.toml" -migrate -workers=0 >"$LOG_FILE" 2>&1 &
+            # Use line-buffering so we can reliably detect completion quickly.
+            if command -v stdbuf >/dev/null 2>&1; then
+              stdbuf -oL -eL /opt/whatomate/bin/whatomate server -config "/opt/whatomate/config/config-$NEW.toml" -migrate -workers=0 >"$LOG_FILE" 2>&1 &
+            else
+              /opt/whatomate/bin/whatomate server -config "/opt/whatomate/config/config-$NEW.toml" -migrate -workers=0 >"$LOG_FILE" 2>&1 &
+            fi
             PID=$!
 
             # Wait up to 120 seconds for migrations to complete.
             # If the process exits early, propagate its exit code.
             for i in $(seq 1 120); do
               if ! kill -0 "$PID" 2>/dev/null; then
-                wait "$PID"
-                echo "Migration process exited before completion. Logs:"
-                cat "$LOG_FILE"
+                wait "$PID" || EXIT_CODE=$?
+                echo "Migration process exited before completion (exit=${EXIT_CODE:-0}). Logs (last 200 lines):"
+                tail -n 200 "$LOG_FILE" || true
                 exit 1
               fi
               if grep -q "Migration completed" "$LOG_FILE"; then
@@ -80,8 +85,8 @@ jobs:
               sleep 1
             done
 
-            echo "Timed out waiting for migrations to complete (120s). Logs:"
-            cat "$LOG_FILE"
+            echo "Timed out waiting for migrations to complete (120s). Logs (last 200 lines):"
+            tail -n 200 "$LOG_FILE" || true
             kill -TERM "$PID" 2>/dev/null || true
             exit 1
 
