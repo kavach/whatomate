@@ -44,8 +44,46 @@ jobs:
               NEW=blue
             fi
             echo "Running database migrations..."
-            /opt/whatomate/bin/whatomate server -config /opt/whatomate/config/config-$NEW.toml -migrate
-            echo "Migrations completed successfully."
+            # NOTE: `whatomate server -migrate` keeps running after migrations.
+            # Run it in the background, wait for the migration completion log,
+            # then terminate it so this step exits.
+            LOG_FILE="/tmp/whatomate-migrate-${NEW}-$(date +%s).log"
+            /opt/whatomate/bin/whatomate server -config "/opt/whatomate/config/config-$NEW.toml" -migrate -workers=0 >"$LOG_FILE" 2>&1 &
+            PID=$!
+
+            # Wait up to 120 seconds for migrations to complete.
+            # If the process exits early, propagate its exit code.
+            for i in $(seq 1 120); do
+              if ! kill -0 "$PID" 2>/dev/null; then
+                wait "$PID"
+                echo "Migration process exited before completion. Logs:"
+                cat "$LOG_FILE"
+                exit 1
+              fi
+              if grep -q "Migration completed" "$LOG_FILE"; then
+                echo "Migrations completed successfully."
+                kill -TERM "$PID" 2>/dev/null || true
+                # Give it a moment to shutdown gracefully.
+                for _ in $(seq 1 10); do
+                  if ! kill -0 "$PID" 2>/dev/null; then
+                    break
+                  fi
+                  sleep 1
+                done
+                # If still running, force kill.
+                if kill -0 "$PID" 2>/dev/null; then
+                  kill -KILL "$PID" 2>/dev/null || true
+                fi
+                wait "$PID" 2>/dev/null || true
+                exit 0
+              fi
+              sleep 1
+            done
+
+            echo "Timed out waiting for migrations to complete (120s). Logs:"
+            cat "$LOG_FILE"
+            kill -TERM "$PID" 2>/dev/null || true
+            exit 1
 
       - name: Blue-Green switch
         uses: appleboy/ssh-action@v1.0.3
