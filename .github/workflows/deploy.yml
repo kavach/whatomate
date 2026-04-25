@@ -48,6 +48,10 @@ jobs:
             # Run it in the background, wait for the migration completion log,
             # then terminate it so this step exits.
             LOG_FILE="/tmp/whatomate-migrate-${NEW}-$(date +%s).log"
+            # Avoid clashing with the blue/green ports (8081/8082). We only need the
+            # server command to run migrations; binding a public port is unnecessary here.
+            export WHATOMATE_SERVER_HOST="127.0.0.1"
+            export WHATOMATE_SERVER_PORT="39081"
             # Use line-buffering so we can reliably detect completion quickly.
             if command -v stdbuf >/dev/null 2>&1; then
               stdbuf -oL -eL /opt/whatomate/bin/whatomate server -config "/opt/whatomate/config/config-$NEW.toml" -migrate -workers=0 >"$LOG_FILE" 2>&1 &
@@ -61,6 +65,10 @@ jobs:
             for i in $(seq 1 120); do
               if ! kill -0 "$PID" 2>/dev/null; then
                 wait "$PID" || EXIT_CODE=$?
+                if grep -q "Migration completed" "$LOG_FILE"; then
+                  echo "Migrations completed successfully."
+                  exit 0
+                fi
                 echo "Migration process exited before completion (exit=${EXIT_CODE:-0}). Logs (last 200 lines):"
                 tail -n 200 "$LOG_FILE" || true
                 exit 1
