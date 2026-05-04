@@ -47,7 +47,7 @@ type IncomingTextMessage struct {
 	ID         string `json:"id"`
 	Timestamp  string `json:"timestamp"`
 	Type       string `json:"type"`
-	Text      *struct {
+	Text       *struct {
 		Body string `json:"body"`
 	} `json:"text,omitempty"`
 	Interactive *struct {
@@ -413,7 +413,7 @@ func (a *App) processIncomingMessageFull(phoneNumberID string, msg IncomingTextM
 	}
 
 	// Try to match flow trigger keywords first (before greeting to avoid duplicate messages)
-	if flow := a.matchFlowTrigger(account.OrganizationID, account.Name, messageText); flow != nil {
+	if flow := a.matchFlowTrigger(account.OrganizationID, messageText); flow != nil {
 		a.startFlow(account, session, contact, flow)
 		return
 	}
@@ -754,7 +754,6 @@ func (a *App) sendAndSaveFlowMessage(account *models.WhatsAppAccount, contact *m
 	return err
 }
 
-
 // getOrCreateSession finds an active session or creates a new one
 // Returns the session and a boolean indicating if it's a new session
 func (a *App) getOrCreateSession(orgID, contactID uuid.UUID, accountName, phoneNumber string, timeoutMins int) (*models.ChatbotSession, bool) {
@@ -805,7 +804,7 @@ func (a *App) logSessionMessage(sessionID uuid.UUID, direction models.Direction,
 }
 
 // matchFlowTrigger checks if the message triggers any flow
-func (a *App) matchFlowTrigger(orgID uuid.UUID, accountName, messageText string) *models.ChatbotFlow {
+func (a *App) matchFlowTrigger(orgID uuid.UUID, messageText string) *models.ChatbotFlow {
 	// Use cached flows (includes steps)
 	flows, err := a.getChatbotFlowsCached(orgID)
 	if err != nil {
@@ -1129,6 +1128,14 @@ func (a *App) sendFlowCompletionWebhook(flow *models.ChatbotFlow, session *model
 		return
 	}
 
+	// Seed phone_number into the substitution map so custom URL/body/header
+	// templates can reference {{phone_number}} (parity with fetchAPIContext
+	// and the flow-step API fetch path).
+	if session.SessionData == nil {
+		session.SessionData = models.JSONB{}
+	}
+	session.SessionData["phone_number"] = session.PhoneNumber
+
 	// Replace variables in URL
 	webhookURL = processTemplate(webhookURL, session.SessionData)
 
@@ -1360,7 +1367,7 @@ func (a *App) sendStepMessage(account *models.WhatsAppAccount, session *models.C
 	case models.FlowStepTypeAPIFetch:
 		// Fetch response from external API (may include message + buttons)
 		// Pass the step message as template - it will be processed with API response data
-		apiResp, err := a.fetchApiResponse(step.ApiConfig, session.SessionData, step.Message)
+		apiResp, err := a.fetchApiResponse(step.ApiConfig, session, step.Message)
 		if err != nil {
 			a.Log.Error("Failed to fetch API response", "error", err, "step", step.StepName)
 			// Use fallback message if configured, otherwise use the step message
@@ -1612,10 +1619,23 @@ type ApiResponse struct {
 }
 
 // fetchApiResponse fetches a response from an external API, supporting message + buttons
-// and response_mapping for storing API data in session variables
-func (a *App) fetchApiResponse(apiConfig models.JSONB, sessionData models.JSONB, messageTemplate string) (*ApiResponse, error) {
+// and response_mapping for storing API data in session variables.
+//
+// Mirrors fetchAPIContext in seeding implicit variables (phone_number) so flow-step
+// API templates can interpolate {{phone_number}} just like AI-context API templates.
+func (a *App) fetchApiResponse(apiConfig models.JSONB, session *models.ChatbotSession, messageTemplate string) (*ApiResponse, error) {
 	if apiConfig == nil {
 		return nil, fmt.Errorf("API config is empty")
+	}
+
+	sessionData := models.JSONB{}
+	if session != nil {
+		sessionData = session.SessionData
+		if sessionData == nil {
+			sessionData = models.JSONB{}
+			session.SessionData = sessionData
+		}
+		sessionData["phone_number"] = session.PhoneNumber
 	}
 
 	replaceVar := func(s string) string { return processTemplate(s, sessionData) }
@@ -2297,6 +2317,16 @@ func (a *App) saveIncomingMessage(account *models.WhatsAppAccount, contact *mode
 	if err := a.DB.Create(&message).Error; err != nil {
 		a.Log.Error("Failed to save incoming message", "error", err)
 		return
+	}
+
+	// If the chatbot will handle this conversation (enabled + no active
+	// agent transfer), pre-mark the message as read so the contact-list
+	// unread badge doesn't briefly flash before the bot's reply arrives.
+	// See issue #280.
+	if a.willChatbotHandle(account, contact) {
+		a.DB.Model(&models.Message{}).Where("id = ?", message.ID).
+			Update("status", models.MessageStatusRead)
+		message.Status = models.MessageStatusRead
 	}
 
 	// Update contact's last message info
