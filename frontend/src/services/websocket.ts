@@ -3,6 +3,7 @@ import { useTransfersStore } from '@/stores/transfers'
 import { useCallingStore } from '@/stores/calling'
 import { useAuthStore } from '@/stores/auth'
 import { useNotesStore } from '@/stores/notes'
+import { contactsService } from '@/services/api'
 import { toast } from 'vue-sonner'
 import router from '@/router'
 
@@ -307,8 +308,32 @@ class WebSocketService {
       }
     }
 
-    // Update contacts list (for unread count, last message preview)
-    store.fetchContacts()
+    // If the user is actively viewing this contact, mark messages read on
+    // the server before refetching so the unread badge stays at zero
+    // (otherwise the new message comes back as unread and the sidebar flashes
+    // a count for a chat that's already open). See issue #280.
+    // Use currentContact.id (already validated, from our /contacts response)
+    // rather than the WS payload value to avoid pushing untrusted data into
+    // a request URL.
+    // Skip the call when the message already arrived as 'read' — the backend
+    // pre-marks chatbot-handled messages at save time, and re-marking just
+    // touches DB rows that are already in the right state.
+    // Also skip when the agent isn't actually looking — that includes both
+    // tab-hidden (different browser tab) and window-unfocused (browser is
+    // visible but agent is in another OS window). Firing markRead in those
+    // cases would send a WhatsApp read receipt to the customer (blue ticks)
+    // for a message no one has read. The mark fires when the user comes
+    // back instead (handled in ChatView's focus/visibility listeners).
+    const alreadyRead = payload.status === 'read'
+    const userActive = typeof document === 'undefined'
+      || (document.visibilityState === 'visible' && document.hasFocus())
+    if (isViewingThisContact && currentContact && payload.direction === 'incoming' && !alreadyRead && userActive) {
+      contactsService.markRead(currentContact.id)
+        .catch(() => { /* non-critical, will resync on next chat-open */ })
+        .finally(() => store.fetchContacts())
+    } else {
+      store.fetchContacts()
+    }
   }
 
   private handleStatusUpdate(store: ReturnType<typeof useContactsStore>, payload: any) {
