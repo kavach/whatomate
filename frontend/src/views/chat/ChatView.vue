@@ -90,6 +90,7 @@ import { getInitials, getAvatarGradient } from '@/lib/utils'
 import { useColorMode } from '@/composables/useColorMode'
 import { useInfiniteScroll } from '@/composables/useInfiniteScroll'
 import CannedResponsePicker from '@/components/chat/CannedResponsePicker.vue'
+import PreviewButtonGroup from '@/components/chatbot/flow-preview/PreviewButtonGroup.vue'
 import TemplatePicker from '@/components/chat/TemplatePicker.vue'
 import ContactInfoPanel from '@/components/chat/ContactInfoPanel.vue'
 import ConversationNotes from '@/components/chat/ConversationNotes.vue'
@@ -801,30 +802,57 @@ function extractCannedTokens(content: string): string[] {
   return Array.from(seen)
 }
 
-const cannedPreview = computed(() => {
-  if (!selectedCannedResponse.value) return ''
+// Collect tokens from the message body AND every button field, so the param
+// dialog prompts for custom tokens used anywhere on the response.
+function extractCannedTokensFromResponse(r: CannedResponse): string[] {
+  const seen = new Set<string>(extractCannedTokens(r.content))
+  for (const btn of r.buttons || []) {
+    for (const t of extractCannedTokens(btn.title || '')) seen.add(t)
+    for (const t of extractCannedTokens(btn.url || '')) seen.add(t)
+    for (const t of extractCannedTokens(btn.phone_number || '')) seen.add(t)
+  }
+  return Array.from(seen)
+}
+
+// Shared {{...}} resolver used by the body preview and the button fields, so
+// `{{phone_number}}` works inside a button URL the same way it does in content.
+function resolveCannedTokens(text: string): string {
+  if (!text) return text
   const contact = contactsStore.currentContact
-  return selectedCannedResponse.value.content.replace(
-    /\{\{\s*([\w.-]+)\s*\}\}/g,
-    (_match, key: string) => {
-      if (key === 'contact_name') {
-        return contact?.profile_name || contact?.name || 'there'
-      }
-      if (key === 'phone_number') {
-        return contact?.phone_number || ''
-      }
-      if (key === 'user_name' || key === 'agent_name') {
-        return authStore.user?.full_name || ''
-      }
-      const value = cannedParamValues.value[key]
-      return value ? value : `{{${key}}}`
+  return text.replace(/\{\{\s*([\w.-]+)\s*\}\}/g, (_match, key: string) => {
+    if (key === 'contact_name') {
+      return contact?.profile_name || contact?.name || 'there'
     }
-  )
+    if (key === 'phone_number') {
+      return contact?.phone_number || ''
+    }
+    if (key === 'user_name' || key === 'agent_name') {
+      return authStore.user?.full_name || ''
+    }
+    const value = cannedParamValues.value[key]
+    return value ? value : `{{${key}}}`
+  })
+}
+
+const cannedPreview = computed(() =>
+  selectedCannedResponse.value ? resolveCannedTokens(selectedCannedResponse.value.content) : '',
+)
+
+// Resolved buttons (with {{...}} substitution applied) for the dialog preview.
+// Empty array when no response is selected or it has no buttons.
+const cannedPreviewButtons = computed(() => {
+  const raw = selectedCannedResponse.value?.buttons || []
+  return raw.map(b => ({
+    ...b,
+    title: resolveCannedTokens(b.title),
+    ...(b.url !== undefined ? { url: resolveCannedTokens(b.url) } : {}),
+    ...(b.phone_number !== undefined ? { phone_number: resolveCannedTokens(b.phone_number) } : {}),
+  }))
 })
 
 function handleCannedSelect(response: CannedResponse) {
   selectedCannedResponse.value = response
-  const tokens = extractCannedTokens(response.content).filter(
+  const tokens = extractCannedTokensFromResponse(response).filter(
     t => !AUTO_RESOLVED_CANNED_TOKENS.has(t)
   )
   cannedParamNames.value = tokens
@@ -848,15 +876,57 @@ async function sendCannedResponse() {
 
   const body = cannedPreview.value
   const responseId = selectedCannedResponse.value.id
+  // Substitute {{...}} tokens in every button field — same rules as the body —
+  // so URLs like https://x.com/u/{{phone_number}} resolve at send time.
+  const buttons = (selectedCannedResponse.value.buttons || []).map(b => ({
+    ...b,
+    title: resolveCannedTokens(b.title),
+    ...(b.url !== undefined ? { url: resolveCannedTokens(b.url) } : {}),
+    ...(b.phone_number !== undefined ? { phone_number: resolveCannedTokens(b.phone_number) } : {}),
+  }))
+  const replyButtons = buttons.filter(b => !b.type || b.type === 'reply')
+  const urlButtons = buttons.filter(b => b.type === 'url')
+
+  // WhatsApp Cloud API supports: 1-3 reply buttons (interactive.button),
+  // 4-10 reply rows (interactive.list — backend's SendInteractiveButtons
+  // auto-picks the right shape), or a single cta_url. Phone buttons and
+  // multi-URL / mixed combos aren't representable; the detail-page validator
+  // blocks save for those, so the text fallback here is just a safety net.
+  let sendType: 'text' | 'interactive' = 'text'
+  let interactive: {
+    type: 'button' | 'list' | 'cta_url'
+    body: string
+    buttons?: Array<{ id: string; title: string }>
+    button_text?: string
+    url?: string
+  } | undefined
+
+  if (buttons.length > 0 && replyButtons.length === buttons.length && replyButtons.length <= 10) {
+    sendType = 'interactive'
+    interactive = {
+      type: replyButtons.length <= 3 ? 'button' : 'list',
+      body,
+      buttons: replyButtons.map(b => ({ id: b.id, title: b.title })),
+    }
+  } else if (buttons.length === 1 && urlButtons.length === 1) {
+    sendType = 'interactive'
+    interactive = {
+      type: 'cta_url',
+      body,
+      button_text: urlButtons[0].title,
+      url: urlButtons[0].url || '',
+    }
+  }
 
   isSendingCanned.value = true
   try {
     await contactsStore.sendMessage(
       contactsStore.currentContact.id,
-      'text',
-      { body },
+      sendType,
+      sendType === 'interactive' ? { body } : { body },
       contactsStore.replyingTo?.id,
-      selectedAccount.value || undefined
+      selectedAccount.value || undefined,
+      interactive ? { interactive } : undefined,
     )
     cannedResponsesService.use(responseId).catch(() => {})
     contactsStore.clearReplyingTo()
@@ -2387,10 +2457,15 @@ async function sendMediaMessage() {
               class="h-9 canned-response-param"
             />
           </div>
-          <div v-if="cannedPreview" class="space-y-1">
+          <div v-if="cannedPreview || cannedPreviewButtons.length" class="space-y-1">
             <label class="text-xs font-medium text-muted-foreground">{{ $t('chat.preview') }}</label>
             <div id="canned-response-preview" class="chat-bubble chat-bubble-outgoing ml-auto" style="max-width: 100%;">
-              <span class="whitespace-pre-wrap break-words text-sm">{{ cannedPreview }}</span>
+              <span v-if="cannedPreview" class="whitespace-pre-wrap break-words text-sm">{{ cannedPreview }}</span>
+              <PreviewButtonGroup
+                v-if="cannedPreviewButtons.length"
+                :buttons="cannedPreviewButtons"
+                disabled
+              />
             </div>
           </div>
         </div>
