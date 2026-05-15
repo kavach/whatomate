@@ -1,19 +1,64 @@
-name: Deploy Whatomate to Oracle Cloud VM
+name: Dispatch — build and deploy Whatomate (Production)
 
 on:
   workflow_dispatch:
 
+permissions:
+  contents: read
+  actions: write
+
 jobs:
+  build:
+    runs-on: ubuntu-latest
+    outputs:
+      artifact-id: ${{ steps.upload-binary.outputs.artifact-id }}
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm install
+
+      - name: Build production binary
+        run: GOOS=linux GOARCH=arm64 make build-prod
+
+      - name: Verify binary
+        run: |
+          ls -lh whatomate
+          file whatomate
+
+      - name: Upload production binary
+        id: upload-binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: whatomate-linux-arm64
+          path: whatomate
+
   deploy:
+    needs: build
     runs-on: ubuntu-latest
 
     steps:
-      - name: Download latest production artifact
-        uses: dawidd6/action-download-artifact@v3
+      - name: Download production artifact
+        uses: actions/download-artifact@v4
         with:
-          workflow: build.yml
           name: whatomate-linux-arm64
-          branch: release
           path: .
 
       - name: Set executable permission
@@ -141,19 +186,14 @@ jobs:
         run: rm -f whatomate
 
       - name: Delete artifact from GitHub Actions storage
-        if: success()
+        if: success() && needs.build.outputs.artifact-id != ''
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          # Get the artifact ID for the specific artifact name
-          ARTIFACTS=$(curl -s -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts?per_page=100")
-
-          ARTIFACT_ID=$(echo "$ARTIFACTS" | jq -r '.artifacts[] | select(.name=="whatomate-linux-arm64") | .id' | head -1)
-
-          if [ -n "$ARTIFACT_ID" ] && [ "$ARTIFACT_ID" != "null" ]; then
-            echo "Deleting artifact ID: $ARTIFACT_ID"
-            curl -X DELETE -H "Authorization: token ${{ secrets.GITHUB_TOKEN }}" \
-              "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID"
-            echo "Artifact deleted successfully"
-          else
-            echo "Artifact not found or already deleted"
-          fi
+          ARTIFACT_ID="${{ needs.build.outputs.artifact-id }}"
+          echo "Deleting artifact ID: $ARTIFACT_ID"
+          curl -sS -f -X DELETE -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            -H "X-GitHub-Api-Version: 2022-11-28" \
+            "https://api.github.com/repos/${{ github.repository }}/actions/artifacts/$ARTIFACT_ID"
+          echo "Artifact deleted successfully"
