@@ -516,6 +516,134 @@ func TestRunChatGraph_Prompt_MaxRetriesRoutesToEdge(t *testing.T) {
 	assert.Equal(t, models.SessionStatusCompleted, session.Status)
 }
 
+// TestRunChatGraph_ButtonsThenPromptSendsQuestion covers the regression where
+// a Prompt reached in the same run as a Buttons click (ctx.consumed already
+// true) used to yield silently without sending its body. The prompt must ask
+// its question, park, then accept the next inbound as the answer.
+func TestRunChatGraph_ButtonsThenPromptSendsQuestion(t *testing.T) {
+	app, org, account, contact, session := newGraphTestFixtures(t)
+
+	const promptBody = "कृपया अपना नाम बताये"
+	flow := &models.ChatbotFlow{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		WhatsAppAccount: account.Name,
+		Name:            "buttons-then-prompt",
+		IsEnabled:       true,
+		Graph: models.JSONB{
+			"version":    2,
+			"entry_node": "b1",
+			"nodes": []any{
+				map[string]any{
+					"id": "b1", "type": "buttons", "label": "choose",
+					"config": map[string]any{
+						"body": "Continue?",
+						"buttons": []any{
+							map[string]any{"id": "btn_yes", "title": "Yes"},
+						},
+					},
+				},
+				map[string]any{
+					"id": "p1", "type": "prompt", "label": "ask name",
+					"config": map[string]any{
+						"body":     promptBody,
+						"store_as": "name",
+					},
+				},
+				map[string]any{
+					"id": "e1", "type": "end", "label": "done",
+					"config": map[string]any{"message": "Thanks!"},
+				},
+			},
+			"edges": []any{
+				map[string]any{"from": "b1", "to": "p1", "condition": "button:btn_yes"},
+				map[string]any{"from": "p1", "to": "e1", "condition": "default"},
+			},
+		},
+	}
+	require.NoError(t, app.DB.Create(flow).Error)
+
+	// Trigger → buttons sent, parked at b1.
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))
+	require.NoError(t, app.DB.First(session, session.ID).Error)
+	require.Equal(t, "b1", session.CurrentStep)
+
+	// Tap Yes: buttons consume click, prompt must send its question and yield.
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "Yes", "btn_yes", nil))
+	require.NoError(t, app.DB.First(session, session.ID).Error)
+	assert.Equal(t, "p1", session.CurrentStep, "should park at prompt after button click")
+	assert.Equal(t, models.SessionStatusActive, session.Status)
+
+	var promptMsgs []models.ChatbotSessionMessage
+	require.NoError(t, app.DB.Where("session_id = ? AND step_name = ? AND direction = ?",
+		session.ID, "p1", models.DirectionOutgoing).Find(&promptMsgs).Error)
+	require.Len(t, promptMsgs, 1, "prompt body must be sent on the button-click turn")
+	assert.Equal(t, promptBody, promptMsgs[0].Message)
+
+	// Name reply → store + advance to end.
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "KRISHNA", "", nil))
+	require.NoError(t, app.DB.First(session, session.ID).Error)
+	assert.Equal(t, models.SessionStatusCompleted, session.Status)
+	assert.Equal(t, "KRISHNA", session.SessionData["name"])
+}
+
+// TestRunChatGraph_CTAOnlyButtonsContinueAfterSend verifies URL/Phone-only
+// buttons nodes do not park forever (WhatsApp never reports CTA clicks).
+// After send, the runner follows the first CTA button's edge immediately.
+func TestRunChatGraph_CTAOnlyButtonsContinueAfterSend(t *testing.T) {
+	app, org, account, contact, session := newGraphTestFixtures(t)
+
+	flow := &models.ChatbotFlow{
+		BaseModel:       models.BaseModel{ID: uuid.New()},
+		OrganizationID:  org.ID,
+		WhatsAppAccount: account.Name,
+		Name:            "cta-only-continue",
+		IsEnabled:       true,
+		Graph: models.JSONB{
+			"version":    2,
+			"entry_node": "b1",
+			"nodes": []any{
+				map[string]any{
+					"id": "b1", "type": "buttons", "label": "maps",
+					"config": map[string]any{
+						"body": "Open our location",
+						"buttons": []any{
+							map[string]any{
+								"id": "btn_maps", "title": "Maps", "type": "url",
+								"url": "https://maps.example.com",
+							},
+						},
+					},
+				},
+				map[string]any{
+					"id": "e1", "type": "end", "label": "done",
+					"config": map[string]any{"message": "See you there!"},
+				},
+			},
+			"edges": []any{
+				map[string]any{"from": "b1", "to": "e1", "condition": "button:btn_maps"},
+			},
+		},
+	}
+	require.NoError(t, app.DB.Create(flow).Error)
+
+	require.NoError(t, app.runChatGraph(account, contact, session, flow, "start", "", nil))
+	require.NoError(t, app.DB.First(session, session.ID).Error)
+	assert.Equal(t, models.SessionStatusCompleted, session.Status,
+		"CTA-only buttons should continue without waiting for a click")
+
+	path := chatGraphPath(t, session)
+	require.GreaterOrEqual(t, len(path), 2)
+	assert.Equal(t, "b1", path[0]["node"])
+	assert.Equal(t, "button:btn_maps", path[0]["outcome"])
+	assert.Equal(t, "e1", path[1]["node"])
+
+	var endMsgs []models.ChatbotSessionMessage
+	require.NoError(t, app.DB.Where("session_id = ? AND step_name = ?", session.ID, "e1").Find(&endMsgs).Error)
+	require.Len(t, endMsgs, 1)
+	assert.Equal(t, "See you there!", endMsgs[0].Message)
+}
+
 // newAPICallFlow builds a three-node graph (api_call → message → end)
 // where the api_call's outgoing edges route to differently-labelled
 // message nodes for 2xx vs non-2xx, making it easy to assert which

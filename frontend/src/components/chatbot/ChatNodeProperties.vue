@@ -378,7 +378,7 @@ const typeLabel: Record<string, string> = {
             class="h-7 text-xs font-mono"
           />
         </div>
-        <p class="text-[10px] text-muted-foreground">Reply buttons (max 10) send the user's choice back. URL / Phone buttons (max 2 per node, mutually exclusive with Reply) open a link or call. Wire reply buttons to next nodes by dragging from the button handle on the canvas.</p>
+        <p class="text-[10px] text-muted-foreground">Reply buttons (max 10) send the user's choice back — wire each handle to the next node. URL / Phone buttons (max 2, mutually exclusive with Reply) open a link or call; WhatsApp does not report those taps, so the flow continues to the next node right after the CTA is sent (wire the URL/Phone handle to continue).</p>
       </div>
 
       <!-- Input — buttons always expect a button selection; surface this
