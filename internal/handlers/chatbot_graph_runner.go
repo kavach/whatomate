@@ -248,7 +248,13 @@ func (a *App) execChatMessage(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 // wait for a click); on a later inbound that carries a buttonID, consumes
 // the selection and returns "button:<id>" so the runner can resolve the
 // next edge and advance.
-// Config: { "body": "...", "buttons": [{ "id": "...", "title": "..." }, ...] }
+//
+// URL / Phone (CTA) buttons are an exception: WhatsApp never sends a
+// click webhook for them, so a CTA-only node would park forever if it
+// yielded. After sending CTA-only buttons we continue immediately via
+// the first CTA button's "button:<id>" edge (wire that handle to the
+// next node in the builder).
+// Config: { "body": "...", "buttons": [{ "id": "...", "title": "...", "type": "..." }, ...] }
 func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, error) {
 	if !ctx.consumed && ctx.buttonID != "" {
 		ctx.consumed = true
@@ -291,7 +297,37 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 		return nodeOutcome{}, fmt.Errorf("send buttons: %w", err)
 	}
 	a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, body, node.ID)
-	return nodeOutcome{yield: true}, nil
+
+	reply, cta := classifyChatButtons(buttons)
+	// Mixed reply+CTA drops CTA at send time; still wait for a reply click.
+	if len(reply) > 0 {
+		return nodeOutcome{yield: true}, nil
+	}
+	// CTA-only: no inbound click will arrive — continue via the first
+	// CTA button's edge so the flow can send the next message.
+	if len(cta) == 0 {
+		return nodeOutcome{yield: true}, nil
+	}
+	firstID, _ := cta[0]["id"].(string)
+	if firstID == "" {
+		firstID = "btn_1"
+	}
+	return nodeOutcome{outcome: "button:" + firstID}, nil
+}
+
+// classifyChatButtons splits configured buttons into reply vs CTA (url/phone),
+// matching sendAndSaveInteractiveButtons.
+func classifyChatButtons(buttons []map[string]any) (reply, cta []map[string]any) {
+	for _, btn := range buttons {
+		btnType, _ := btn["type"].(string)
+		switch btnType {
+		case "url", "phone":
+			cta = append(cta, btn)
+		default:
+			reply = append(reply, btn)
+		}
+	}
+	return reply, cta
 }
 
 // execChatPrompt asks the user for input. On first entry (no userInput),
@@ -316,8 +352,11 @@ func (a *App) execChatButtons(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, er
 func (a *App) execChatPrompt(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, error) {
 	body := stringFromConfig(node.Config, "body", "message", "text")
 
-	// No input yet → send prompt and wait.
-	if !ctx.consumed && ctx.userInput == "" {
+	// First entry for this prompt: either no unused inbound text, or we
+	// arrived immediately after another blocking node (e.g. Buttons)
+	// already consumed the click. In both cases ask the question and wait
+	// — never treat the prior button title as the prompt's answer.
+	if ctx.consumed || ctx.userInput == "" {
 		if body == "" {
 			return nodeOutcome{}, fmt.Errorf("prompt node %q has no body configured", node.ID)
 		}
@@ -326,12 +365,6 @@ func (a *App) execChatPrompt(node *ChatNode, ctx *chatNodeCtx) (nodeOutcome, err
 			return nodeOutcome{}, fmt.Errorf("send prompt: %w", err)
 		}
 		a.logSessionMessage(ctx.session.ID, models.DirectionOutgoing, rendered, node.ID)
-		return nodeOutcome{yield: true}, nil
-	}
-
-	if ctx.consumed {
-		// Input was already consumed by an earlier blocking node in this
-		// run — defensive guard. Treat as fresh entry.
 		return nodeOutcome{yield: true}, nil
 	}
 
