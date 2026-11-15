@@ -155,7 +155,6 @@ const initiateSSO = (provider: string) => {
               <RouterLink to="/register">{{ $t('auth.signUp') }}</RouterLink>
             </p>
           </footer>
-        </article>
     </div>
-  </main>
+  </div>
 </template>
