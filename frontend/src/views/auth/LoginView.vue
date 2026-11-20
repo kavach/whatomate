@@ -148,10 +148,6 @@ const initiateSSO = (provider: string) => {
             </p>
           </footer>
         </article>
-        <p class="text-light align-center">
-          {{ $t('auth.poweredBy') }}
-          <a href="https://whatomate.io/" target="_blank" rel="noopener noreferrer">Whatomate</a>
-        </p>
     </div>
   </main>
 </template>
