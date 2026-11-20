@@ -4,13 +4,8 @@ import { useRouter, useRoute } from "vue-router";
 import { useI18n } from "vue-i18n";
 import { useAuthStore } from "@/stores/auth";
 import { api } from "@/services/api";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Separator } from "@/components/ui/separator";
 import { toast } from "@/lib/toast";
-import { MessageSquare, Loader2 } from "lucide-vue-next";
-import logoImage from "../../../public/favicon.ico";
+import { MessageSquare } from "@/lib/icons";
 
 const { t } = useI18n()
 
@@ -158,5 +153,5 @@ const initiateSSO = (provider: string) => {
           <a href="https://whatomate.io/" target="_blank" rel="noopener noreferrer">Whatomate</a>
         </p>
     </div>
-  </div>
+  </main>
 </template>
