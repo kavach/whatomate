@@ -12,7 +12,12 @@ import { toast } from "@/lib/toast";
 import { MessageSquare, Loader2 } from "lucide-vue-next";
 import logoImage from "../../../public/favicon.ico";
 
-const { t } = useI18n();
+const { t } = useI18n()
+
+// Injected into index.html by the server from [app] config; absent in the Vite dev server.
+const branding: { name?: string; logo_url?: string } = (window as any).__BRANDING__ ?? {}
+const appName = branding.name || 'Whatomate'
+const logoUrl = branding.logo_url || ''
 
 interface SSOProvider {
   provider: string;
@@ -85,23 +90,15 @@ const initiateSSO = (provider: string) => {
 </script>
 
 <template>
-  <div
-    class="min-h-screen flex items-center justify-center bg-[#0a0a0b] light:bg-gradient-to-br light:from-gray-50 light:to-gray-100 p-4"
-  >
-    <div
-      class="w-full max-w-md rounded-2xl border border-white/[0.08] bg-white/[0.02] backdrop-blur light:bg-white light:border-gray-200 light:shadow-xl"
-    >
-      <div class="p-8 space-y-1 text-center">
-        <div class="flex justify-center mb-4">
-          <img :src="logoImage" alt="Logo" class="h-24 w-24 object-contain" />
-        </div>
-        <h2 class="text-2xl font-bold text-white light:text-gray-900">
-          Welcome to BGS Chatbot Platform
-        </h2>
-        <p class="text-white/50 light:text-gray-500">
-          {{ $t("auth.welcomeSubtitle") }}
-        </p>
-      </div>
+  <main class="flex items-center justify-center h-screen scroll-y p-4">
+    <div class="auth-panel vstack gap-4">
+        <article class="card">
+          <header class="vstack gap-2 items-center align-center mb-6">
+            <img v-if="logoUrl" :src="logoUrl" :alt="appName" height="48" />
+            <MessageSquare v-else :size="32" />
+            <h2>{{ $t('auth.welcomeTitle', { name: appName }) }}</h2>
+            <p class="text-light">{{ $t('auth.welcomeSubtitle') }}</p>
+          </header>
 
           <form @submit.prevent="handleLogin">
             <label data-field>
@@ -155,6 +152,11 @@ const initiateSSO = (provider: string) => {
               <RouterLink to="/register">{{ $t('auth.signUp') }}</RouterLink>
             </p>
           </footer>
+        </article>
+        <p class="text-light align-center">
+          {{ $t('auth.poweredBy') }}
+          <a href="https://whatomate.io/" target="_blank" rel="noopener noreferrer">Whatomate</a>
+        </p>
     </div>
   </div>
 </template>
